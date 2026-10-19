@@ -14,9 +14,11 @@ import android.content.pm.ShortcutManager
 import android.graphics.drawable.Icon
 import android.media.AudioAttributes
 import android.media.AudioManager
+import android.media.MediaPlayer
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.media.ToneGenerator
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Process
@@ -44,6 +46,7 @@ class MainActivity : FlutterActivity() {
 
     private var initialSosTrigger: Boolean = false
     private var initialLostModeLock: Boolean = false
+    private var alarmPlayer: MediaPlayer? = null
     private var alarmRingtone: Ringtone? = null
     private var previewTone: ToneGenerator? = null
     private var previewRingtone: Ringtone? = null
@@ -177,28 +180,83 @@ class MainActivity : FlutterActivity() {
                 "playLoudAlarm" -> {
                     try {
                         val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                        val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
-                        audioManager.setStreamVolume(AudioManager.STREAM_ALARM, maxVol, 0)
+
+                        // 1. Keluar dari mode hening/getar (Silent / Vibrate) paksa ke RINGER_MODE_NORMAL
+                        try {
+                            audioManager.ringerMode = AudioManager.RINGER_MODE_NORMAL
+                        } catch (_: Exception) {}
+
+                        // 2. Maksimalkan volume di semua saluran audio darurat
+                        val targetStreams = intArrayOf(
+                            AudioManager.STREAM_ALARM,
+                            AudioManager.STREAM_MUSIC,
+                            AudioManager.STREAM_RING,
+                            AudioManager.STREAM_NOTIFICATION
+                        )
+                        for (st in targetStreams) {
+                            try {
+                                val max = audioManager.getStreamMaxVolume(st)
+                                audioManager.setStreamVolume(st, max, 0)
+                            } catch (_: Exception) {}
+                        }
+
+                        stopLoudAlarmInternal()
+
+                        // 3. AudioAttributes USAGE_ALARM + FLAG_AUDIBILITY_ENFORCED agar tembus silent mode OS
+                        val audioAttributes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                            AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_ALARM)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                                .setFlags(AudioAttributes.FLAG_AUDIBILITY_ENFORCED)
+                                .build()
+                        } else {
+                            null
+                        }
 
                         val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
                         val chosenSound = prefs.getString("flutter.ringtone_loud_signal", "radar_beep") ?: "radar_beep"
 
-                        stopLoudAlarmInternal()
-                        if (chosenSound == "radar_beep" || chosenSound == "digital_bell" || chosenSound.startsWith("siren_") || chosenSound.startsWith("tone_")) {
-                            playSoundTone(chosenSound)
+                        val alertUri: Uri? = if (chosenSound == "system_ringtone") {
+                            RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+                                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
                         } else {
-                            val alertUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                            RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
                                 ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+                                ?: Settings.System.DEFAULT_ALARM_ALERT_URI
+                        }
 
-                            alarmRingtone = RingtoneManager.getRingtone(applicationContext, alertUri)?.apply {
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                                    audioAttributes = AudioAttributes.Builder()
-                                        .setUsage(AudioAttributes.USAGE_ALARM)
-                                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                                        .build()
+                        var mpStarted = false
+                        if (alertUri != null) {
+                            try {
+                                alarmPlayer = MediaPlayer().apply {
+                                    if (audioAttributes != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                                        setAudioAttributes(audioAttributes)
+                                    } else {
+                                        @Suppress("DEPRECATION")
+                                        setAudioStreamType(AudioManager.STREAM_ALARM)
+                                    }
+                                    setDataSource(applicationContext, alertUri)
+                                    isLooping = true
+                                    setVolume(1.0f, 1.0f)
+                                    prepare()
+                                    start()
                                 }
-                                play()
+                                mpStarted = true
+                            } catch (e: Exception) {
+                                e.printStackTrace()
                             }
+                        }
+
+                        if (!mpStarted) {
+                            if (alertUri != null) {
+                                alarmRingtone = RingtoneManager.getRingtone(applicationContext, alertUri)?.apply {
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && audioAttributes != null) {
+                                        this.audioAttributes = audioAttributes
+                                    }
+                                    play()
+                                }
+                            }
+                            playSoundTone(chosenSound)
                         }
 
                         // Alarm vibration
@@ -339,6 +397,34 @@ class MainActivity : FlutterActivity() {
                 }
                 "isAntiBypassActive" -> {
                     result.success(isLostModeActive())
+                }
+                "hasOverlayPermission" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        result.success(Settings.canDrawOverlays(this))
+                    } else {
+                        result.success(true)
+                    }
+                }
+                "requestOverlayPermission" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+                        try {
+                            val intent = Intent(
+                                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                Uri.parse("package:$packageName")
+                            ).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            startActivity(intent)
+                        } catch (_: Exception) {
+                            try {
+                                val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
+                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                }
+                                startActivity(intent)
+                            } catch (_: Exception) {}
+                        }
+                    }
+                    result.success(true)
                 }
                 else -> result.notImplemented()
             }
@@ -564,6 +650,17 @@ class MainActivity : FlutterActivity() {
 
     private fun stopLoudAlarmInternal() {
         stopSoundPreview()
+        try {
+            alarmPlayer?.apply {
+                if (isPlaying) {
+                    stop()
+                }
+                reset()
+                release()
+            }
+        } catch (_: Exception) {}
+        alarmPlayer = null
+
         alarmRingtone?.stop()
         alarmRingtone = null
         stopVibrate()

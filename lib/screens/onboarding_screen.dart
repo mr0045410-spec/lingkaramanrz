@@ -16,6 +16,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
   bool _cameraGranted = false;
   bool _micGranted = false;
   bool _batteryExemptGranted = false;
+  bool _overlayGranted = false;
   bool _isChecking = true;
 
   @override
@@ -45,6 +46,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
     final cam = await Permission.camera.isGranted;
     final mic = await Permission.microphone.isGranted;
     final battery = await Permission.ignoreBatteryOptimizations.isGranted;
+    final overlay = await Permission.systemAlertWindow.isGranted;
 
     if (mounted) {
       setState(() {
@@ -53,6 +55,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
         _cameraGranted = cam;
         _micGranted = mic;
         _batteryExemptGranted = battery;
+        _overlayGranted = overlay;
         _isChecking = false;
       });
     }
@@ -101,12 +104,21 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
     await _checkPermissions();
   }
 
+  Future<void> _requestOverlayPermission() async {
+    final status = await Permission.systemAlertWindow.request();
+    if (!status.isGranted) {
+      await openAppSettings();
+    }
+    await _checkPermissions();
+  }
+
   Future<void> _requestAllPermissions() async {
     await _requestLocationPermission();
     await _requestNotificationPermission();
     await _requestCameraPermission();
     await _requestMicPermission();
     await _requestBatteryPermission();
+    await _requestOverlayPermission();
   }
 
   Future<void> _finishOnboarding() async {
@@ -117,7 +129,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
 
   @override
   Widget build(BuildContext context) {
-    final allGranted = _locAlwaysGranted && _notifGranted && _cameraGranted && _micGranted && _batteryExemptGranted;
+    final allGranted = _locAlwaysGranted &&
+        _notifGranted &&
+        _cameraGranted &&
+        _micGranted &&
+        _batteryExemptGranted &&
+        _overlayGranted;
 
     return Scaffold(
       backgroundColor: Colors.grey.shade50,
@@ -242,6 +259,19 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
                           'Mencegah sistem Android mematikan pelacakan GPS dan perlindungan anti-maling saat layar padam.',
                       isGranted: _batteryExemptGranted,
                       onTap: _requestBatteryPermission,
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    // Permission Card 6: Overlay on Lock Screen & Apps
+                    _buildPermissionCard(
+                      icon: Icons.layers_outlined,
+                      iconColor: Colors.indigo.shade700,
+                      title: 'Tampil di Atas Layar Kunci & Aplikasi',
+                      subtitle:
+                          'Wajib agar layar kunci darurat & perlindungan anti-maling langsung tampil di atas layar saat HP hilang atau dicuri.',
+                      isGranted: _overlayGranted,
+                      onTap: _requestOverlayPermission,
                     ),
 
                     const SizedBox(height: 24),

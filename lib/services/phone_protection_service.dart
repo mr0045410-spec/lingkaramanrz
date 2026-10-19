@@ -96,6 +96,22 @@ class PhoneProtectionService {
     }
   }
 
+  Future<bool> hasOverlayPermission() async {
+    try {
+      final res = await _nativeLostMode.invokeMethod<bool>('hasOverlayPermission');
+      if (res != null) return res;
+    } catch (_) {}
+    return false;
+  }
+
+  Future<void> requestOverlayPermission() async {
+    try {
+      await _nativeLostMode.invokeMethod('requestOverlayPermission');
+    } catch (e) {
+      debugPrint('Error requesting overlay permission: $e');
+    }
+  }
+
   Future<void> initialize() async {
     final prefs = await SharedPreferences.getInstance();
     final isActive = prefs.getBool(_kLostModeActive) ?? false;
