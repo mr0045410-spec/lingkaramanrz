@@ -1,14 +1,11 @@
 package com.lingkaraman.lingkar_aman
 
 import android.app.AlarmManager
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import androidx.core.app.NotificationCompat
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
@@ -26,11 +23,16 @@ class BootReceiver : BroadcastReceiver() {
 
         if (!validActions.contains(action)) return
 
-        val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-        val isLostMode = prefs.getBoolean("flutter.lost_mode_active", false)
-        val isSosPowerEnabled = prefs.getBoolean("flutter.sos_power_button_enabled", true)
+        val isLost = isLostModeActive(context)
 
         // 1. Pulihkan monitor tombol power darurat jika aktif
+        val isSosPowerEnabled = try {
+            val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+            prefs.getBoolean("flutter.sos_power_button_enabled", true)
+        } catch (_: Exception) {
+            true
+        }
+
         if (isSosPowerEnabled) {
             try {
                 SosPowerService.startService(context)
@@ -40,8 +42,8 @@ class BootReceiver : BroadcastReceiver() {
         }
 
         // 2. Anti-Bypass: Jika Mode HP Hilang aktif sebelum reboot / cabut baterai,
-        // aktifkan kembali perlindungan seketika tanpa jeda!
-        if (isLostMode) {
+        // aktifkan kembali perlindungan dan notifikasi persisten seketika tanpa jeda!
+        if (isLost) {
             try {
                 LostModeProtectionService.startService(context)
 
@@ -52,6 +54,7 @@ class BootReceiver : BroadcastReceiver() {
                     addFlags(
                         Intent.FLAG_ACTIVITY_NEW_TASK or
                         Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP or
                         Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
                     )
                 }
@@ -61,7 +64,7 @@ class BootReceiver : BroadcastReceiver() {
                     context,
                     9992,
                     lockIntent,
-                    PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
 
                 val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
@@ -78,80 +81,24 @@ class BootReceiver : BroadcastReceiver() {
             } catch (e: Exception) {
                 e.printStackTrace()
             }
-        } else {
-            // 3. Normal Boot: Jalankan aplikasi otomatis setelah handphone dinyalakan ulang (Auto-start on boot)
-            try {
-                val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-                    ?: Intent(context, MainActivity::class.java).apply {
-                        this.action = Intent.ACTION_MAIN
-                        addCategory(Intent.CATEGORY_LAUNCHER)
-                    }
-
-                launchIntent.apply {
-                    addFlags(
-                        Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                        Intent.FLAG_ACTIVITY_SINGLE_TOP
-                    )
-                }
-
-                val pendingIntent = PendingIntent.getActivity(
-                    context,
-                    9991,
-                    launchIntent,
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-
-                // Jadwalkan peluncuran otomatis melalui AlarmManager 1 detik setelah boot
-                val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
-                alarmManager?.set(
-                    AlarmManager.RTC_WAKEUP,
-                    System.currentTimeMillis() + 1000,
-                    pendingIntent
-                )
-
-                // Tampilkan notifikasi dengan full-screen intent agar langsung membuka aplikasi pada lockscreen/startup
-                showBootAutoStartNotification(context, pendingIntent)
-
-                // Coba panggil startActivity langsung jika sistem mengizinkan
-                try {
-                    context.startActivity(launchIntent)
-                } catch (_: Exception) {}
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
         }
     }
 
-    private fun showBootAutoStartNotification(context: Context, pendingIntent: PendingIntent) {
-        try {
-            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
-            val channelId = "lingkaraman_autostart_channel"
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val channel = NotificationChannel(
-                    channelId,
-                    "LingkarAman Mulai Otomatis",
-                    NotificationManager.IMPORTANCE_HIGH
-                ).apply {
-                    description = "Memastikan aplikasi langsung berjalan dan melindungi keluarga setelah handphone dinyalakan"
-                    setShowBadge(true)
+    private fun isLostModeActive(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                val directContext = context.createDeviceProtectedStorageContext()
+                val directPrefs = directContext.getSharedPreferences("lingkaraman_direct_boot_prefs", Context.MODE_PRIVATE)
+                if (directPrefs.contains("lost_mode_active")) {
+                    return directPrefs.getBoolean("lost_mode_active", false)
                 }
-                notificationManager.createNotificationChannel(channel)
-            }
-
-            val notification = NotificationCompat.Builder(context, channelId)
-                .setSmallIcon(R.mipmap.ic_launcher)
-                .setContentTitle("LingkarAman Aktif")
-                .setContentText("Aplikasi berjalan otomatis untuk melindungi keluarga.")
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setCategory(NotificationCompat.CATEGORY_STATUS)
-                .setContentIntent(pendingIntent)
-                .setFullScreenIntent(pendingIntent, false)
-                .setAutoCancel(true)
-                .build()
-
-            notificationManager.notify(9995, notification)
-        } catch (_: Exception) {}
+            } catch (_: Exception) {}
+        }
+        return try {
+            val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+            prefs.getBoolean("flutter.lost_mode_active", false)
+        } catch (_: Exception) {
+            false
+        }
     }
 }

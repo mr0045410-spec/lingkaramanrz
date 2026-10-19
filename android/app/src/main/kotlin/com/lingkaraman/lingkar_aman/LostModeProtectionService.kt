@@ -52,10 +52,60 @@ class LostModeProtectionService : Service() {
         startForeground(NOTIFICATION_ID, buildLockNotification())
     }
 
+    private fun isLostModeActiveService(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                val directContext = createDeviceProtectedStorageContext()
+                val directPrefs = directContext.getSharedPreferences("lingkaraman_direct_boot_prefs", Context.MODE_PRIVATE)
+                if (directPrefs.contains("lost_mode_active")) {
+                    return directPrefs.getBoolean("lost_mode_active", false)
+                }
+            } catch (_: Exception) {}
+        }
+        return try {
+            val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.getBoolean(KEY_LOST_MODE_ACTIVE, false)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun getContactPhone(): String {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                val directContext = createDeviceProtectedStorageContext()
+                val directPrefs = directContext.getSharedPreferences("lingkaraman_direct_boot_prefs", Context.MODE_PRIVATE)
+                val phone = directPrefs.getString("lost_mode_contact_phone", null)
+                if (!phone.isNullOrEmpty()) return phone
+            } catch (_: Exception) {}
+        }
+        return try {
+            val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.getString(KEY_CONTACT_PHONE, "") ?: ""
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    private fun getCustomMessage(): String {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                val directContext = createDeviceProtectedStorageContext()
+                val directPrefs = directContext.getSharedPreferences("lingkaraman_direct_boot_prefs", Context.MODE_PRIVATE)
+                val msg = directPrefs.getString("lost_mode_message", null)
+                if (!msg.isNullOrEmpty()) return msg
+            } catch (_: Exception) {}
+        }
+        return try {
+            val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.getString(KEY_MESSAGE, "") ?: ""
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val isActive = prefs.getBoolean(KEY_LOST_MODE_ACTIVE, false)
-        if (!isActive) {
+        if (!isLostModeActiveService()) {
             stopSelf()
             return START_NOT_STICKY
         }
@@ -85,9 +135,8 @@ class LostModeProtectionService : Service() {
     }
 
     private fun buildLockNotification(): Notification {
-        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val contactPhone = prefs.getString(KEY_CONTACT_PHONE, "") ?: ""
-        val customMsg = prefs.getString(KEY_MESSAGE, "") ?: ""
+        val contactPhone = getContactPhone()
+        val customMsg = getCustomMessage()
 
         val lockIntent = Intent(this, MainActivity::class.java).apply {
             action = "ACTION_LOST_MODE_LOCK"
@@ -131,8 +180,7 @@ class LostModeProtectionService : Service() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val isLostMode = prefs.getBoolean(KEY_LOST_MODE_ACTIVE, false)
+        val isLostMode = isLostModeActiveService()
 
         if (isLostMode) {
             // Anti-Bypass: Pencuri berusaha menghapus aplikasi dari Recent Apps / Clear Memory

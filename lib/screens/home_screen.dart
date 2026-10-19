@@ -39,7 +39,6 @@ class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription<LoudSignalModel>? _incomingSignalSub;
   StreamSubscription<String>? _signalStoppedSub;
   StreamSubscription<GeofenceTransition>? _geofenceTransitionSub;
-  StreamSubscription<LostModeCommand>? _lostModeSub;
   StreamSubscription<IntruderAlertModel>? _intruderAlertSub;
   StreamSubscription<LastBreathBeaconModel>? _lastBreathSub;
   StreamSubscription<bool>? _gpsStatusSub;
@@ -70,7 +69,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _incomingSignalSub?.cancel();
     _signalStoppedSub?.cancel();
     _geofenceTransitionSub?.cancel();
-    _lostModeSub?.cancel();
     _intruderAlertSub?.cancel();
     _lastBreathSub?.cancel();
     _loudSignalService.stopListening();
@@ -202,20 +200,6 @@ class _HomeScreenState extends State<HomeScreen> {
     // Initialize Phone Protection (Lost Mode, Intruder Trap, Last Breath)
     await _phoneProtectionService.initialize();
 
-    _lostModeSub = _phoneProtectionService.onLostModeChanged.listen((cmd) {
-      if (!mounted) return;
-      final myUid = _supa.currentUser?.id;
-      if (cmd.targetUserId == myUid) {
-        if (cmd.isActive) {
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => LostModeScreen(command: cmd),
-            ),
-          );
-        }
-      }
-    });
-
     _intruderAlertSub = _phoneProtectionService.onIntruderAlert.listen((alert) {
       if (!mounted) return;
       _showIntruderAlertDialog(alert);
@@ -245,19 +229,7 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     // Check if Lost Mode was persisted from previous session OR active remotely on server
-    final remoteCmd = await _phoneProtectionService.checkAndApplyRemoteLostMode();
-    if (remoteCmd != null || (_phoneProtectionService.isLostModeActive && _phoneProtectionService.activeLostMode != null)) {
-      final activeCmd = remoteCmd ?? _phoneProtectionService.activeLostMode!;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => LostModeScreen(command: activeCmd),
-            ),
-          );
-        }
-      });
-    }
+    await _phoneProtectionService.checkAndApplyRemoteLostMode();
 
     // Load user's circles & active SOS alerts
     await _loadCircles();

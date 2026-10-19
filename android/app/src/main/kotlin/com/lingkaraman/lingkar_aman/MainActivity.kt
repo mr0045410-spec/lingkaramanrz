@@ -67,8 +67,6 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-        notificationManager?.cancel(9995)
 
         if (intent?.getBooleanExtra("trigger_sos_immediately", false) == true) {
             initialSosTrigger = true
@@ -81,8 +79,6 @@ class MainActivity : FlutterActivity() {
 
     override fun onResume() {
         super.onResume()
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-        notificationManager?.cancel(9995)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -361,37 +357,20 @@ class MainActivity : FlutterActivity() {
                     val msg = call.argument<String>("message") ?: ""
                     val siren = call.argument<Boolean>("enableSiren") ?: true
 
-                    val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-                    prefs.edit()
-                        .putBoolean("flutter.lost_mode_active", true)
-                        .putString("flutter.lost_mode_contact_phone", phone)
-                        .putString("flutter.lost_mode_message", msg)
-                        .putBoolean("flutter.lost_mode_siren", siren)
-                        .apply()
+                    saveLostModeState(true, phone, msg, siren)
 
                     applyLockWindowFlags(true)
                     setRecentsExclusion(true)
                     LostModeProtectionService.startService(this)
 
-                    try {
-                        startLockTask()
-                    } catch (_: Exception) {}
-
                     result.success(true)
                 }
                 "disableAntiBypass" -> {
-                    val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-                    prefs.edit()
-                        .putBoolean("flutter.lost_mode_active", false)
-                        .apply()
+                    saveLostModeState(false, "", "", false)
 
                     applyLockWindowFlags(false)
                     setRecentsExclusion(false)
                     LostModeProtectionService.stopService(this)
-
-                    try {
-                        stopLockTask()
-                    } catch (_: Exception) {}
 
                     result.success(true)
                 }
@@ -529,7 +508,41 @@ class MainActivity : FlutterActivity() {
         manager?.cancel(GPS_NOTIFICATION_ID)
     }
 
+    private fun saveLostModeState(active: Boolean, phone: String, msg: String, siren: Boolean) {
+        val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+        prefs.edit()
+            .putBoolean("flutter.lost_mode_active", active)
+            .putString("flutter.lost_mode_contact_phone", phone)
+            .putString("flutter.lost_mode_message", msg)
+            .putBoolean("flutter.lost_mode_siren", siren)
+            .apply()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                val directContext = createDeviceProtectedStorageContext()
+                val directPrefs = directContext.getSharedPreferences("lingkaraman_direct_boot_prefs", Context.MODE_PRIVATE)
+                directPrefs.edit()
+                    .putBoolean("lost_mode_active", active)
+                    .putString("lost_mode_contact_phone", phone)
+                    .putString("lost_mode_message", msg)
+                    .putBoolean("lost_mode_siren", siren)
+                    .apply()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
     private fun isLostModeActive(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                val directContext = createDeviceProtectedStorageContext()
+                val directPrefs = directContext.getSharedPreferences("lingkaraman_direct_boot_prefs", Context.MODE_PRIVATE)
+                if (directPrefs.contains("lost_mode_active")) {
+                    return directPrefs.getBoolean("lost_mode_active", false)
+                }
+            } catch (_: Exception) {}
+        }
         val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
         return prefs.getBoolean("flutter.lost_mode_active", false)
     }
