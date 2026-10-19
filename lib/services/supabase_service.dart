@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -12,6 +13,9 @@ class SupabaseService {
   static final SupabaseService _instance = SupabaseService._internal();
   factory SupabaseService() => _instance;
   SupabaseService._internal();
+
+  static double? _lastRecordedLat;
+  static double? _lastRecordedLng;
 
   SupabaseClient get _client => Supabase.instance.client;
   SupabaseClient get client => _client;
@@ -359,6 +363,22 @@ class SupabaseService {
   }) async {
     final uid = currentUser?.id;
     if (uid == null) return;
+
+    // Filter pergeseran minimal 15 meter untuk menghemat kuota database & baterai
+    if (_lastRecordedLat != null && _lastRecordedLng != null) {
+      final distance = Geolocator.distanceBetween(
+        _lastRecordedLat!,
+        _lastRecordedLng!,
+        latitude,
+        longitude,
+      );
+      if (distance < 15.0) {
+        return; // Belum bergeser 15 meter, lewati
+      }
+    }
+
+    _lastRecordedLat = latitude;
+    _lastRecordedLng = longitude;
 
     final now = DateTime.now();
     final newPoint = TripPoint(

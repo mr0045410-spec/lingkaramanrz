@@ -1246,6 +1246,123 @@ class _MapViewScreenState extends State<MapViewScreen> {
     );
   }
 
+  void _showSosDetailDialog(SosAlert alert) {
+    final isIntruder = alert.message.contains('[JEBAKAN PENYUSUP]');
+    String? photoUrl;
+    if (isIntruder) {
+      final match = RegExp(r'Foto:\s*(https?://\S+)').firstMatch(alert.message);
+      if (match != null) {
+        photoUrl = match.group(1);
+      }
+    }
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        backgroundColor: const Color(0xFF1E1E2C),
+        title: Row(
+          children: [
+            Icon(
+              isIntruder ? Icons.camera_front : Icons.warning_amber_rounded,
+              color: isIntruder ? Colors.deepOrangeAccent : Colors.redAccent,
+              size: 28,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                isIntruder ? 'JEBAKAN PENYUSUP' : 'PERINGATAN DARURAT',
+                style: TextStyle(
+                  color: isIntruder ? Colors.deepOrangeAccent : Colors.redAccent,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (photoUrl != null) ...[
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.network(
+                    photoUrl,
+                    height: 220,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                    loadingBuilder: (context, child, progress) {
+                      if (progress == null) return child;
+                      return Container(
+                        height: 220,
+                        color: Colors.black26,
+                        child: const Center(child: CircularProgressIndicator()),
+                      );
+                    },
+                    errorBuilder: (context, error, stackTrace) => Container(
+                      height: 120,
+                      color: Colors.black26,
+                      alignment: Alignment.center,
+                      child: const Text(
+                        'Foto tidak dapat dimuat atau telah kedaluwarsa.',
+                        style: TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+              Text(
+                alert.message,
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  const Icon(Icons.location_on, color: Colors.white54, size: 14),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      'Koordinat: ${alert.latitude.toStringAsFixed(5)}, ${alert.longitude.toStringAsFixed(5)}',
+                      style: const TextStyle(color: Colors.white54, fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  const Icon(Icons.access_time, color: Colors.white54, size: 14),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Waktu: ${alert.triggeredAt.toLocal().toString().split('.')[0]}',
+                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _mapController.move(LatLng(alert.latitude, alert.longitude), 17.0);
+            },
+            child: const Text('Lihat di Peta', style: TextStyle(color: Colors.cyanAccent)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Tutup', style: TextStyle(color: Colors.white70)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildGeofenceMarker(GeofenceModel geo) {
     final color = _getGeofenceColor(geo.category);
     final icon = _getGeofenceIcon(geo.category);
@@ -1344,7 +1461,10 @@ class _MapViewScreenState extends State<MapViewScreen> {
           point: LatLng(alert.latitude, alert.longitude),
           width: 100,
           height: 80,
-          child: _buildSosMarker(alert),
+          child: GestureDetector(
+            onTap: () => _showSosDetailDialog(alert),
+            child: _buildSosMarker(alert),
+          ),
         ),
       );
     }
@@ -1496,10 +1616,12 @@ class _MapViewScreenState extends State<MapViewScreen> {
                   tooltip: 'Peringatan Darurat',
                   onTap: () {
                     if (widget.activeAlerts.isNotEmpty) {
+                      _showSosDetailDialog(widget.activeAlerts.first);
+                    } else {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('${widget.activeAlerts.length} Peringatan SOS aktif.'),
-                          backgroundColor: Colors.red.shade800,
+                        const SnackBar(
+                          content: Text('Tidak ada peringatan darurat saat ini.'),
+                          duration: Duration(seconds: 2),
                         ),
                       );
                     }

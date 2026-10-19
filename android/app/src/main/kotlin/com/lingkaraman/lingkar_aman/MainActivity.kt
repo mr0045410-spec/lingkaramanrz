@@ -252,14 +252,15 @@ class MainActivity : FlutterActivity() {
                         val startTime = calendar.timeInMillis
                         val endTime = System.currentTimeMillis()
 
-                        val stats = usageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startTime, endTime)
+                        val aggregatedStats = usageStatsManager.queryAndAggregateUsageStats(startTime, endTime)
                         val pm = packageManager
                         val results = mutableListOf<Map<String, Any>>()
 
-                        stats?.filter { it.totalTimeInForeground > 30000 } // Used more than 30 seconds
-                            ?.sortedByDescending { it.totalTimeInForeground }
-                            ?.take(15)
-                            ?.forEach { u ->
+                        aggregatedStats.values
+                            .filter { it.totalTimeInForeground > 60000 } // Used more than 1 minute (60,000 ms)
+                            .sortedByDescending { it.totalTimeInForeground }
+                            .take(25)
+                            .forEach { u ->
                                 val appName = try {
                                     val appInfo = pm.getApplicationInfo(u.packageName, 0)
                                     pm.getApplicationLabel(appInfo).toString()

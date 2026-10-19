@@ -4,14 +4,12 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'supabase_service.dart';
 
 class IntruderCameraService {
   static final IntruderCameraService _instance = IntruderCameraService._internal();
   factory IntruderCameraService() => _instance;
   IntruderCameraService._internal();
 
-  final SupabaseService _supa = SupabaseService();
   bool _isCapturing = false;
 
   bool get isCapturing => _isCapturing;
@@ -73,43 +71,27 @@ class IntruderCameraService {
       final localTarget = File('${appDir.path}/intruder_$timestamp.jpg');
       await imageFile.copy(localTarget.path);
 
-      // 7. Upload to Supabase Storage
-      final targetUid = userId ?? _supa.currentUser?.id ?? 'intruder_unknown';
-      final storagePath = 'intruders/${targetUid}_$timestamp.jpg';
+      // 7. Upload to Supabase Storage bucket 'ambient_audio' pada folder 'intruder_photos/intruder_$timestamp.jpg'
+      final storagePath = 'intruder_photos/intruder_$timestamp.jpg';
 
       String? publicUrl;
       try {
         final bytes = await localTarget.readAsBytes();
         
-        // Try 'intruder_photos' bucket first, fallback to 'ambient_audio'
-        try {
-          await Supabase.instance.client.storage
-              .from('intruder_photos')
-              .uploadBinary(
-                storagePath,
-                bytes,
-                fileOptions: const FileOptions(contentType: 'image/jpeg', upsert: true),
-              );
-          publicUrl = Supabase.instance.client.storage
-              .from('intruder_photos')
-              .getPublicUrl(storagePath);
-        } catch (_) {
-          await Supabase.instance.client.storage
-              .from('ambient_audio')
-              .uploadBinary(
-                storagePath,
-                bytes,
-                fileOptions: const FileOptions(contentType: 'image/jpeg', upsert: true),
-              );
-          publicUrl = Supabase.instance.client.storage
-              .from('ambient_audio')
-              .getPublicUrl(storagePath);
-        }
+        await Supabase.instance.client.storage
+            .from('ambient_audio')
+            .uploadBinary(
+              storagePath,
+              bytes,
+              fileOptions: const FileOptions(contentType: 'image/jpeg', upsert: true),
+            );
+        publicUrl = Supabase.instance.client.storage
+            .from('ambient_audio')
+            .getPublicUrl(storagePath);
 
         debugPrint('[IntruderCameraService] Successfully uploaded intruder selfie: $publicUrl');
       } catch (uploadError) {
         debugPrint('[IntruderCameraService] Upload failed (offline), using local path: $uploadError');
-        // Return local file path as fallback
         publicUrl = localTarget.path;
       }
 

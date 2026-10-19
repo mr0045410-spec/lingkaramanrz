@@ -212,6 +212,40 @@ Laporan waktu layar (*Screen Time*) dan durasi pemakaian aplikasi HP anak.
 
 ---
 
+### 12. `location_history`
+Riwayat pergerakan titik lokasi perjalanan (*Trip Points*) anggota keluarga untuk ditampilkan pada garis lintasan perjalanan (*Polyline*).
+* **Primary Key:** `id` (UUID, `gen_random_uuid()`)
+* **Index:** `idx_location_history_user_time` pada `(user_id, recorded_at DESC)`
+
+| Nama Kolom | Tipe Data | Nullable | Default | Keterangan |
+| :--- | :--- | :--- | :--- | :--- |
+| `id` | `UUID` | No | `gen_random_uuid()` | ID titik riwayat perjalanan |
+| `user_id` | `UUID` | No | - | FK `profiles(id) ON DELETE CASCADE` |
+| `latitude` | `DOUBLE PRECISION` | No | - | Garis lintang GPS |
+| `longitude` | `DOUBLE PRECISION` | No | - | Garis bujur GPS |
+| `speed` | `DOUBLE PRECISION` | Yes | `0.0` | Kecepatan bergerak (m/s) |
+| `battery_level` | `INTEGER` | Yes | `100` | Sisa baterai saat titik tercatat (%) |
+| `recorded_at` | `TIMESTAMPTZ` | Yes | `now()` | Waktu titik koordinat disimpan |
+
+---
+
+### 13. `remote_commands`
+Antrean instruksi perintah jarak jauh untuk fitur keamanan HP Hilang (*Lost Mode*), *Fake Shutdown*, dan *Remote Wipe*. Memungkinkan perintah tetap tereksekusi saat perangkat kembali online.
+* **Primary Key:** `id` (UUID, `gen_random_uuid()`)
+
+| Nama Kolom | Tipe Data | Nullable | Default | Keterangan |
+| :--- | :--- | :--- | :--- | :--- |
+| `id` | `UUID` | No | `gen_random_uuid()` | ID perintah |
+| `circle_id` | `UUID` | Yes | `NULL` | FK `circles(id) ON DELETE CASCADE` |
+| `sender_id` | `UUID` | No | - | Pengirim perintah (FK `profiles(id)`) |
+| `target_user_id` | `UUID` | No | - | Anggota target yang dikendalikan (FK `profiles(id)`) |
+| `command_type` | `VARCHAR(30)` | No | - | Tipe perintah (`lost_mode_on`, `lost_mode_off`, `fake_shutdown`, `remote_wipe`) |
+| `status` | `VARCHAR(20)` | No | `'pending'` | Status eksekusi (`pending`, `executed`, `cancelled`) |
+| `created_at` | `TIMESTAMPTZ` | Yes | `NOW()` | Waktu perintah dibuat |
+| `executed_at` | `TIMESTAMPTZ` | Yes | `NULL` | Waktu instruksi selesai dijalankan |
+
+---
+
 ## ⚡ Stored Procedures & Database Functions
 
 1. **`handle_new_user()`**
@@ -240,6 +274,7 @@ Tabel-tabel berikut telah didaftarkan ke `supabase_realtime` sehingga perubahan 
 4. `public.loud_signals`
 5. `public.geofence_events`
 6. `public.audio_requests`
+7. `public.remote_commands`
 
 ---
 

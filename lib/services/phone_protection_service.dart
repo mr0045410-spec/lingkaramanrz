@@ -29,6 +29,7 @@ class PhoneProtectionService {
   static const String _kVaultLocked = 'vault_locked';
 
   RealtimeChannel? _channel;
+  RealtimeChannel? _remoteCommandsChannel;
   bool _isListening = false;
 
   LostModeCommand? _activeLostMode;
@@ -137,6 +138,24 @@ class PhoneProtectionService {
     }
 
     startListening();
+
+    // Periksa apakah ada remote command yang pending saat inisialisasi
+    if (_currentUserId != null) {
+      try {
+        final pendingCommands = await _safeClient
+            ?.from('remote_commands')
+            .select()
+            .eq('target_user_id', _currentUserId!)
+            .eq('status', 'pending')
+            .order('created_at', ascending: false)
+            .limit(1);
+        if (pendingCommands != null && pendingCommands.isNotEmpty) {
+          await _handleRemoteCommandRecord(pendingCommands.first);
+        }
+      } catch (e) {
+        debugPrint('[PhoneProtection] Error checking initial pending remote_commands: $e');
+      }
+    }
   }
 
   void startListening() {
@@ -146,7 +165,9 @@ class PhoneProtectionService {
     final client = _safeClient;
     if (client == null) return;
 
-    // Realtime broadcast channel for instant multi-device synchronisation
+    final myUid = _currentUserId;
+
+    // 1. Realtime broadcast channel for instant multi-device synchronisation
     _channel = client.channel('phone_protection');
 
     _channel!
@@ -155,7 +176,6 @@ class PhoneProtectionService {
           callback: (payload) async {
             try {
               final cmd = LostModeCommand.fromMap(payload);
-              final myUid = _currentUserId;
               if (cmd.targetUserId == myUid) {
                 await _applyLocalLostMode(cmd);
               }
@@ -170,7 +190,6 @@ class PhoneProtectionService {
           callback: (payload) async {
             try {
               final targetUserId = payload['target_user_id'] as String?;
-              final myUid = _currentUserId;
               if (targetUserId == myUid) {
                 await executeLocalVaultLock();
               }
@@ -202,11 +221,101 @@ class PhoneProtectionService {
           },
         )
         .subscribe();
+
+    // 2. Realtime Postgres Changes listener pada tabel public.remote_commands
+    if (myUid != null) {
+      _remoteCommandsChannel = client
+          .channel('public:remote_commands:$myUid')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'remote_commands',
+            filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: 'target_user_id',
+              value: myUid,
+            ),
+            callback: (payload) async {
+              final newRec = payload.newRecord;
+              if (newRec.isEmpty) return;
+              if (newRec['status'] == 'pending') {
+                await _handleRemoteCommandRecord(newRec);
+              }
+            },
+          )
+          .subscribe();
+    }
+  }
+
+  Future<void> _handleRemoteCommandRecord(Map<String, dynamic> rec) async {
+    final id = rec['id'] as String;
+    final cmdType = rec['command_type'] as String?;
+    final senderId = rec['sender_id'] as String? ?? 'remote';
+    final circleId = rec['circle_id'] as String?;
+    final targetUserId = rec['target_user_id'] as String? ?? _currentUserId ?? '';
+
+    // Mark as executed in Supabase
+    try {
+      await _safeClient?.from('remote_commands').update({
+        'status': 'executed',
+        'executed_at': DateTime.now().toIso8601String(),
+      }).eq('id', id);
+    } catch (e) {
+      debugPrint('[PhoneProtection] Error updating remote_command status: $e');
+    }
+
+    if (cmdType == 'lost_mode_on') {
+      final cmd = LostModeCommand(
+        id: id,
+        targetUserId: targetUserId,
+        senderId: senderId,
+        circleId: circleId,
+        isActive: true,
+        contactPhone: '',
+        message: 'HP ini dalam mode hilang. Segera hubungi pemilik.',
+        enableSiren: true,
+        enableFakeShutdown: false,
+        updatedAt: DateTime.now(),
+      );
+      await _applyLocalLostMode(cmd);
+    } else if (cmdType == 'fake_shutdown') {
+      final cmd = LostModeCommand(
+        id: id,
+        targetUserId: targetUserId,
+        senderId: senderId,
+        circleId: circleId,
+        isActive: true,
+        contactPhone: '',
+        message: 'Perangkat sedang dalam mode pura-pura mati.',
+        enableSiren: false,
+        enableFakeShutdown: true,
+        updatedAt: DateTime.now(),
+      );
+      await _applyLocalLostMode(cmd);
+    } else if (cmdType == 'lost_mode_off') {
+      final cmd = LostModeCommand(
+        id: id,
+        targetUserId: targetUserId,
+        senderId: senderId,
+        circleId: circleId,
+        isActive: false,
+        contactPhone: '',
+        message: 'Mode HP Hilang dinonaktifkan.',
+        enableSiren: false,
+        enableFakeShutdown: false,
+        updatedAt: DateTime.now(),
+      );
+      await _applyLocalLostMode(cmd);
+    } else if (cmdType == 'remote_wipe') {
+      await executeRemoteWipe();
+    }
   }
 
   void stopListening() {
     _channel?.unsubscribe();
     _channel = null;
+    _remoteCommandsChannel?.unsubscribe();
+    _remoteCommandsChannel = null;
     _isListening = false;
   }
 
@@ -273,6 +382,20 @@ class PhoneProtectionService {
       );
     }
 
+    // Persist to remote_commands queue
+    try {
+      final commandType = enableFakeShutdown ? 'fake_shutdown' : 'lost_mode_on';
+      await _safeClient?.from('remote_commands').insert({
+        'circle_id': circleId,
+        'sender_id': myUid,
+        'target_user_id': targetUserId,
+        'command_type': commandType,
+        'status': 'pending',
+      });
+    } catch (e) {
+      debugPrint('[PhoneProtection] Error inserting remote_commands: $e');
+    }
+
     // Persist as SOS Alert so circle members and offline targets can see it
     try {
       final pos = LocationService().currentPosition;
@@ -322,6 +445,19 @@ class PhoneProtectionService {
         event: 'lost_mode',
         payload: cmd.toMap(),
       );
+    }
+
+    // Insert deactivation command into remote_commands
+    try {
+      await _safeClient?.from('remote_commands').insert({
+        'circle_id': circleId,
+        'sender_id': myUid,
+        'target_user_id': targetUserId,
+        'command_type': 'lost_mode_off',
+        'status': 'pending',
+      });
+    } catch (e) {
+      debugPrint('[PhoneProtection] Error inserting deactivation remote_command: $e');
     }
 
     // Update sos_alerts status
@@ -548,8 +684,8 @@ class PhoneProtectionService {
 
     try {
       final msg = photoUrl != null
-          ? '[JEBAKAN PENYUSUP] Peringatan! $attemptCount kali salah memasukkan PIN pembuka pada ponsel yang hilang. 📸 Foto wajah penyusup berhasil diambil!'
-          : '[JEBAKAN PENYUSUP] Peringatan! $attemptCount kali salah memasukkan PIN pembuka pada ponsel yang hilang.';
+          ? '[JEBAKAN PENYUSUP] Seseorang salah memasukkan PIN ${attemptCount}x! Foto: $photoUrl'
+          : '[JEBAKAN PENYUSUP] Seseorang salah memasukkan PIN ${attemptCount}x!';
 
       await _safeClient?.from('sos_alerts').insert({
         'user_id': myUid,
@@ -638,6 +774,22 @@ class PhoneProtectionService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kVaultLocked, true);
     debugPrint('[PhoneProtectionService] Local vault locked and sensitive caches secured.');
+  }
+
+  Future<void> executeRemoteWipe() async {
+    await executeLocalVaultLock();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final uid = _currentUserId;
+      if (uid != null) {
+        await prefs.remove('loc_history_$uid');
+      }
+      await prefs.remove('active_circle_id');
+      await prefs.remove('access_token');
+      debugPrint('[PhoneProtectionService] Remote wipe executed successfully.');
+    } catch (e) {
+      debugPrint('[PhoneProtectionService] Error executing remote wipe: $e');
+    }
   }
 
   Future<bool> unlockVault(String pin) async {

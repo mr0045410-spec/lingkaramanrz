@@ -140,8 +140,8 @@ class SosPowerService : Service() {
         }
         startActivity(sosIntent)
 
-        // Notify active Flutter channel if alive
-        MainActivity.notifySosTriggered()
+        // Trigger via direct sender (if Flutter is dead, sends direct HTTP POST to Supabase REST)
+        SosDirectSender.triggerSos(this, "Tombol Fisik Power")
     }
 
     private fun vibratePattern() {

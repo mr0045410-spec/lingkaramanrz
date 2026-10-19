@@ -1,7 +1,11 @@
 import 'dart:async';
 import 'package:battery_plus/battery_plus.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../constants.dart';
 import 'phone_protection_service.dart';
 import 'supabase_service.dart';
 
@@ -186,6 +190,9 @@ class LocationService {
         speed: pos.speed,
       );
 
+      // Simpan koordinat terakhir & kredensial ke SharedPreferences untuk Native Service (SosPowerService & SosTileService)
+      await _saveNativePreferences(pos.latitude, pos.longitude);
+
       await PhoneProtectionService().checkBatteryAndTriggerLastBreath(
         lat: pos.latitude,
         lng: pos.longitude,
@@ -193,6 +200,39 @@ class LocationService {
         isCharging: charging,
       );
     } catch (_) {}
+  }
+
+  Future<void> _saveNativePreferences(double lat, double lng) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble('last_lat', lat);
+      await prefs.setDouble('last_lng', lng);
+      await prefs.setString('last_lat_str', lat.toString());
+      await prefs.setString('last_lng_str', lng.toString());
+      await prefs.setString('supabase_url', AppConstants.supabaseUrl);
+      await prefs.setString('supabase_anon_key', AppConstants.supabaseAnonKey);
+
+      final token = Supabase.instance.client.auth.currentSession?.accessToken;
+      if (token != null && token.isNotEmpty) {
+        await prefs.setString('access_token', token);
+      }
+
+      final uid = Supabase.instance.client.auth.currentUser?.id;
+      if (uid != null && uid.isNotEmpty) {
+        await prefs.setString('user_id', uid);
+      }
+
+      var activeCircleId = prefs.getString('active_circle_id');
+      if (activeCircleId == null || activeCircleId.isEmpty) {
+        final circles = await SupabaseService().getMyCircles();
+        if (circles.isNotEmpty) {
+          activeCircleId = circles.first.id;
+          await prefs.setString('active_circle_id', activeCircleId);
+        }
+      }
+    } catch (e) {
+      debugPrint('[LocationService] _saveNativePreferences error: $e');
+    }
   }
 
   void stopTracking() {

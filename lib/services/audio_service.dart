@@ -130,7 +130,7 @@ class AudioService {
 
       final recordedFile = File(outputPath ?? filePath);
       if (await recordedFile.exists() && await recordedFile.length() > 0) {
-        final storagePath = 'clips/${request.targetId}/${request.id}.m4a';
+        final storagePath = 'recordings/${request.id}.m4a';
         final audioUrl = await _supa.uploadAudioFile(recordedFile.path, storagePath);
 
         await _supa.updateAudioRequest(
@@ -209,7 +209,7 @@ class AudioService {
       if (await recordedFile.exists() && await recordedFile.length() > 0) {
         String audioUrl = recordedFile.path;
         try {
-          final storagePath = 'clips/$uid/${req.id}.m4a';
+          final storagePath = 'recordings/${req.id}.m4a';
           audioUrl = await _supa.uploadAudioFile(recordedFile.path, storagePath);
         } catch (e) {
           debugPrint('[AudioService] Storage upload fallback: $e');

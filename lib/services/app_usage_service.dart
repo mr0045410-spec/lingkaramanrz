@@ -71,19 +71,30 @@ class AppUsageService {
 
     final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
 
-    for (var app in localUsage) {
-      try {
-        await _supa.client.from('app_usage_reports').upsert({
-          'user_id': uid,
-          'package_name': app.packageName,
-          'app_name': app.appName,
-          'total_time_foreground_seconds': app.totalTimeForegroundSeconds,
-          'last_time_used': app.lastTimeUsed?.toIso8601String(),
-          'report_date': todayStr,
-          'updated_at': DateTime.now().toIso8601String(),
-        }, onConflict: 'user_id,package_name,report_date');
-      } catch (e) {
-        debugPrint('Error syncing app usage for ${app.packageName}: $e');
+    final reportsPayload = localUsage.map((app) => {
+      'user_id': uid,
+      'package_name': app.packageName,
+      'app_name': app.appName,
+      'total_time_foreground_seconds': app.totalTimeForegroundSeconds,
+      'last_time_used': app.lastTimeUsed?.toIso8601String(),
+      'report_date': todayStr,
+      'updated_at': DateTime.now().toIso8601String(),
+    }).toList();
+
+    try {
+      await _supa.client.from('app_usage_reports').upsert(
+        reportsPayload,
+        onConflict: 'user_id, package_name, report_date',
+      );
+    } catch (e) {
+      debugPrint('[AppUsageService] Error batch upserting reportsPayload: $e');
+      for (var payload in reportsPayload) {
+        try {
+          await _supa.client.from('app_usage_reports').upsert(
+            payload,
+            onConflict: 'user_id, package_name, report_date',
+          );
+        } catch (_) {}
       }
     }
   }

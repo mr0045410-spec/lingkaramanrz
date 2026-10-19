@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/models.dart';
 import '../services/loud_signal_service.dart';
@@ -56,6 +57,10 @@ class _LostModeScreenState extends State<LostModeScreen> with SingleTickerProvid
       );
     }
 
+    if (_isFakeShutdown) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    }
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         ScaffoldMessenger.of(context).clearSnackBars();
@@ -65,6 +70,7 @@ class _LostModeScreenState extends State<LostModeScreen> with SingleTickerProvid
 
   @override
   void dispose() {
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _pulseController.dispose();
     _tapResetTimer?.cancel();
     _loudSignal.stopNativeAlarm();
@@ -98,7 +104,7 @@ class _LostModeScreenState extends State<LostModeScreen> with SingleTickerProvid
       _fakeShutdownTapCount = 0;
       _showUnlockDialog();
     } else {
-      _tapResetTimer = Timer(const Duration(milliseconds: 900), () {
+      _tapResetTimer = Timer(const Duration(milliseconds: 1500), () {
         _fakeShutdownTapCount = 0;
       });
     }

@@ -60,6 +60,7 @@ class SosTileService : TileService() {
             startActivityAndCollapse(intent)
         }
 
-        MainActivity.notifySosTriggered()
+        // Trigger via direct sender (if Flutter is dead, sends direct HTTP POST to Supabase REST)
+        SosDirectSender.triggerSos(this, "Quick Settings Tile")
     }
 }

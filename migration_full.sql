@@ -223,6 +223,21 @@ CREATE TABLE IF NOT EXISTS public.location_history (
     recorded_at TIMESTAMPTZ DEFAULT now()
 );
 
+CREATE INDEX IF NOT EXISTS idx_location_history_user_time 
+ON public.location_history (user_id, recorded_at DESC);
+
+-- 13. Remote Commands Table (Lost Mode, Fake Shutdown, Remote Wipe)
+CREATE TABLE IF NOT EXISTS public.remote_commands (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    circle_id UUID REFERENCES public.circles(id) ON DELETE CASCADE,
+    sender_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    target_user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    command_type VARCHAR(30) NOT NULL, -- 'lost_mode_on', 'lost_mode_off', 'fake_shutdown', 'remote_wipe'
+    status VARCHAR(20) NOT NULL DEFAULT 'pending', -- 'pending', 'executed', 'cancelled'
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    executed_at TIMESTAMPTZ
+);
+
 -- Enable RLS
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.circles ENABLE ROW LEVEL SECURITY;
@@ -236,6 +251,7 @@ ALTER TABLE public.geofences ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.geofence_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audio_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.location_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.remote_commands ENABLE ROW LEVEL SECURITY;
 
 -- Policies for Profiles
 DROP POLICY IF EXISTS "Profiles are readable by authenticated users" ON public.profiles;
@@ -335,6 +351,13 @@ CREATE POLICY "Users can insert own location history" ON public.location_history
 DROP POLICY IF EXISTS "Location history readable by co-members" ON public.location_history;
 CREATE POLICY "Location history readable by co-members" ON public.location_history FOR SELECT TO authenticated USING (user_id = auth.uid() OR is_co_member_with(user_id));
 
+-- Policies for Remote Commands
+DROP POLICY IF EXISTS "Circle members can manage remote commands" ON public.remote_commands;
+CREATE POLICY "Circle members can manage remote commands"
+ON public.remote_commands FOR ALL TO authenticated
+USING (public.is_member_of(circle_id))
+WITH CHECK (public.is_member_of(circle_id));
+
 -- Realtime Setup
 DO $$
 BEGIN
@@ -344,6 +367,7 @@ BEGIN
     ALTER PUBLICATION supabase_realtime ADD TABLE public.loud_signals;
     ALTER PUBLICATION supabase_realtime ADD TABLE public.geofence_events;
     ALTER PUBLICATION supabase_realtime ADD TABLE public.audio_requests;
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.remote_commands;
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
