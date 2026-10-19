@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -232,6 +233,18 @@ class SupabaseService {
     );
   }
 
+  Future<int> normalizeCircleRoles(String circleId) async {
+    try {
+      final res = await _client.rpc('normalize_circle_roles', params: {'p_circle_id': circleId});
+      final count = (res as num?)?.toInt() ?? 0;
+      debugPrint('[SupabaseService] normalize_circle_roles berhasil memperbaiki $count baris admin di circle $circleId');
+      return count;
+    } catch (e, st) {
+      debugPrint('[SupabaseService] GAGAL menjalankan normalize_circle_roles untuk circle $circleId: $e\n$st');
+      rethrow;
+    }
+  }
+
   Future<List<CircleMember>> getCircleMembers(String circleId) async {
     final membersData = await _client
         .from('circle_members')
@@ -248,6 +261,7 @@ class SupabaseService {
 
     final List<CircleMember> members = [];
     final List<String> userIds = [];
+    bool needsRoleNormalization = false;
 
     for (var m in membersData) {
       final rawMember = CircleMember.fromMap(m);
@@ -265,13 +279,22 @@ class SupabaseService {
         } else if (rawMember.role == 'admin') {
           // Normalisasi anomali database lama ke member
           effectiveRole = 'member';
-          _client.from('circle_members').update({'role': 'member'}).eq('id', rawMember.id).catchError((_) {});
+          needsRoleNormalization = true;
         }
       }
 
       final member = rawMember.copyWith(role: effectiveRole, profile: prof);
       members.add(member);
       userIds.add(member.userId);
+    }
+
+    if (needsRoleNormalization) {
+      try {
+        final fixedRows = await _client.rpc('normalize_circle_roles', params: {'p_circle_id': circleId});
+        debugPrint('[SupabaseService] normalize_circle_roles berhasil memperbaiki $fixedRows baris admin di circle $circleId');
+      } catch (e, st) {
+        debugPrint('[SupabaseService] GAGAL menjalankan normalize_circle_roles untuk circle $circleId: $e\n$st');
+      }
     }
 
     // Fetch locations for all users in circle

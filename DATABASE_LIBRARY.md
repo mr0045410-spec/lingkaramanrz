@@ -219,10 +219,16 @@ Laporan waktu layar (*Screen Time*) dan durasi pemakaian aplikasi HP anak.
    * *Fungsi*: Otomatis membuat baris baru di tabel `profiles` ketika ada user baru yang mendaftar lewat Email atau Google Sign-In.
 2. **`join_circle_by_code(p_code TEXT)`**
    * *Tipe*: RPC Function (`SECURITY DEFINER`)
-   * *Fungsi*: Menerima 6-8 digit kode undangan, mencari ID lingkaran yang cocok, dan mendaftarkan pemanggil ke tabel `circle_members`.
+   * *Fungsi*: Menerima 6-8 digit kode undangan, mencari ID lingkaran yang cocok, dan mendaftarkan pemanggil ke tabel `circle_members` dengan status `'member'`.
 3. **`is_member_of(p_circle_id UUID)`**
-   * *Tipe*: Helper Function (`STABLE`)
+   * *Tipe*: Helper Function (`STABLE`, `SECURITY DEFINER`)
    * *Fungsi*: Memvalidasi apakah user yang sedang login terdaftar sebagai anggota sah di dalam lingkaran tersebut.
+4. **`is_co_member_with(p_user_id UUID)`**
+   * *Tipe*: Helper Function (`STABLE`, `SECURITY DEFINER`)
+   * *Fungsi*: Memvalidasi apakah user yang sedang login berbagi setidaknya satu lingkaran yang sama dengan user target (digunakan untuk isolasi data profil, lokasi, dan laporan).
+5. **`normalize_circle_roles(p_circle_id UUID)`**
+   * *Tipe*: RPC Function (`SECURITY DEFINER`)
+   * *Fungsi*: Mengoreksi baris admin basi/anomali pada lingkaran tertentu, menurunkan role menjadi `'member'` untuk semua anggota yang bukan pembuat (`created_by`) lingkaran. Mengembalikan jumlah baris yang dinormalisasi.
 
 ---
 

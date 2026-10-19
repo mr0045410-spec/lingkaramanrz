@@ -180,6 +180,49 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+CREATE OR REPLACE FUNCTION public.is_co_member_with(p_user_id UUID)
+RETURNS BOOLEAN AS $$
+BEGIN
+    IF p_user_id = auth.uid() THEN
+        RETURN TRUE;
+    END IF;
+    RETURN EXISTS (
+        SELECT 1 FROM public.circle_members cm1
+        JOIN public.circle_members cm2 ON cm1.circle_id = cm2.circle_id
+        WHERE cm1.user_id = auth.uid() AND cm2.user_id = p_user_id
+    );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+
+CREATE OR REPLACE FUNCTION public.normalize_circle_roles(p_circle_id UUID)
+RETURNS INTEGER AS $$
+DECLARE
+    v_updated_count INTEGER;
+BEGIN
+    UPDATE public.circle_members cm
+    SET role = 'member'
+    FROM public.circles c
+    WHERE cm.circle_id = p_circle_id
+      AND c.id = cm.circle_id
+      AND cm.role = 'admin'
+      AND (c.created_by IS NULL OR cm.user_id != c.created_by);
+      
+    GET DIAGNOSTICS v_updated_count = ROW_COUNT;
+    RETURN v_updated_count;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 12. Location History Table
+CREATE TABLE IF NOT EXISTS public.location_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    latitude DOUBLE PRECISION NOT NULL,
+    longitude DOUBLE PRECISION NOT NULL,
+    speed DOUBLE PRECISION DEFAULT 0.0,
+    battery_level INTEGER DEFAULT 100,
+    recorded_at TIMESTAMPTZ DEFAULT now()
+);
+
 -- Enable RLS
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.circles ENABLE ROW LEVEL SECURITY;
@@ -192,16 +235,18 @@ ALTER TABLE public.app_usage_reports ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.geofences ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.geofence_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audio_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.location_history ENABLE ROW LEVEL SECURITY;
 
 -- Policies for Profiles
 DROP POLICY IF EXISTS "Profiles are readable by authenticated users" ON public.profiles;
-CREATE POLICY "Profiles are readable by authenticated users" ON public.profiles FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "Profiles readable by self or circle co-members" ON public.profiles;
+CREATE POLICY "Profiles readable by self or circle co-members" ON public.profiles FOR SELECT TO authenticated USING (auth.uid() = id OR is_co_member_with(id));
 DROP POLICY IF EXISTS "Users can insert own profile" ON public.profiles;
 CREATE POLICY "Users can insert own profile" ON public.profiles FOR INSERT TO authenticated WITH CHECK (auth.uid() = id);
 DROP POLICY IF EXISTS "Users can update own profile" ON public.profiles;
 CREATE POLICY "Users can update own profile" ON public.profiles FOR ALL TO authenticated USING (auth.uid() = id) WITH CHECK (auth.uid() = id);
 
--- Policies for Circles
+-- Policies for Circles (SELECT remains open so users can preview invite codes)
 DROP POLICY IF EXISTS "Authenticated users can view circles" ON public.circles;
 CREATE POLICY "Authenticated users can view circles" ON public.circles FOR SELECT TO authenticated USING (true);
 DROP POLICY IF EXISTS "Users can create circles" ON public.circles;
@@ -209,61 +254,86 @@ CREATE POLICY "Users can create circles" ON public.circles FOR INSERT TO authent
 
 -- Policies for Circle Members
 DROP POLICY IF EXISTS "Members can view circle members" ON public.circle_members;
-CREATE POLICY "Members can view circle members" ON public.circle_members FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Members can view circle members" ON public.circle_members FOR SELECT TO authenticated USING (is_member_of(circle_id));
 DROP POLICY IF EXISTS "Users can join circles" ON public.circle_members;
 CREATE POLICY "Users can join circles" ON public.circle_members FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Admins or self can update circle members" ON public.circle_members;
+CREATE POLICY "Admins or self can update circle members" ON public.circle_members FOR UPDATE TO authenticated USING (auth.uid() = user_id OR EXISTS (SELECT 1 FROM public.circles WHERE id = circle_members.circle_id AND created_by = auth.uid()));
 
 -- Policies for Locations
 DROP POLICY IF EXISTS "Locations readable by circle co-members" ON public.user_locations;
-CREATE POLICY "Locations readable by circle co-members" ON public.user_locations FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Locations readable by circle co-members" ON public.user_locations FOR SELECT TO authenticated USING (user_id = auth.uid() OR is_co_member_with(user_id));
 DROP POLICY IF EXISTS "Users can upsert own location" ON public.user_locations;
 CREATE POLICY "Users can upsert own location" ON public.user_locations FOR ALL TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 -- Policies for SOS Alerts
 DROP POLICY IF EXISTS "SOS alerts readable by circle members" ON public.sos_alerts;
-CREATE POLICY "SOS alerts readable by circle members" ON public.sos_alerts FOR SELECT TO authenticated USING (true);
+CREATE POLICY "SOS alerts readable by circle members" ON public.sos_alerts FOR SELECT TO authenticated USING (user_id = auth.uid() OR (circle_id IS NOT NULL AND is_member_of(circle_id)));
 DROP POLICY IF EXISTS "Users can create SOS alerts" ON public.sos_alerts;
 CREATE POLICY "Users can create SOS alerts" ON public.sos_alerts FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
 DROP POLICY IF EXISTS "Users can update SOS alerts" ON public.sos_alerts;
-CREATE POLICY "Users can update SOS alerts" ON public.sos_alerts FOR UPDATE TO authenticated USING (true);
+DROP POLICY IF EXISTS "Users can update own or circle SOS alerts" ON public.sos_alerts;
+CREATE POLICY "Users can update own or circle SOS alerts" ON public.sos_alerts FOR UPDATE TO authenticated USING (user_id = auth.uid() OR (circle_id IS NOT NULL AND is_member_of(circle_id))) WITH CHECK (user_id = auth.uid() OR (circle_id IS NOT NULL AND is_member_of(circle_id)));
 
 -- Policies for Messages
 DROP POLICY IF EXISTS "Circle members can read messages" ON public.circle_messages;
-CREATE POLICY "Circle members can read messages" ON public.circle_messages FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Circle members can read messages" ON public.circle_messages FOR SELECT TO authenticated USING (is_member_of(circle_id));
 DROP POLICY IF EXISTS "Circle members can post messages" ON public.circle_messages;
-CREATE POLICY "Circle members can post messages" ON public.circle_messages FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Circle members can post messages" ON public.circle_messages FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id AND is_member_of(circle_id));
 
--- Policies for Loud Signals
+-- Policies for Loud Signals (SECURED, NO ANON)
 DROP POLICY IF EXISTS "Allow authenticated read/write loud_signals" ON public.loud_signals;
-CREATE POLICY "Allow authenticated read/write loud_signals" ON public.loud_signals FOR ALL TO authenticated USING (true) WITH CHECK (true);
 DROP POLICY IF EXISTS "Allow anon read/write loud_signals" ON public.loud_signals;
-CREATE POLICY "Allow anon read/write loud_signals" ON public.loud_signals FOR ALL TO anon USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Members can view loud signals" ON public.loud_signals;
+CREATE POLICY "Members can view loud signals" ON public.loud_signals FOR SELECT TO authenticated USING (sender_id = auth.uid() OR target_user_id = auth.uid() OR (circle_id IS NOT NULL AND is_member_of(circle_id)));
+DROP POLICY IF EXISTS "Members can send loud signals" ON public.loud_signals;
+CREATE POLICY "Members can send loud signals" ON public.loud_signals FOR INSERT TO authenticated WITH CHECK (sender_id = auth.uid() AND (circle_id IS NULL OR is_member_of(circle_id)));
+DROP POLICY IF EXISTS "Target or sender can update loud signals" ON public.loud_signals;
+CREATE POLICY "Target or sender can update loud signals" ON public.loud_signals FOR UPDATE TO authenticated USING (sender_id = auth.uid() OR target_user_id = auth.uid()) WITH CHECK (sender_id = auth.uid() OR target_user_id = auth.uid());
 
--- Policies for App Usage Reports
+-- Policies for App Usage Reports (SECURED, NO ANON)
 DROP POLICY IF EXISTS "Allow authenticated read/write app_usage_reports" ON public.app_usage_reports;
-CREATE POLICY "Allow authenticated read/write app_usage_reports" ON public.app_usage_reports FOR ALL TO authenticated USING (true) WITH CHECK (true);
 DROP POLICY IF EXISTS "Allow anon read/write app_usage_reports" ON public.app_usage_reports;
-CREATE POLICY "Allow anon read/write app_usage_reports" ON public.app_usage_reports FOR ALL TO anon USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Users and co-members can view app usage" ON public.app_usage_reports;
+CREATE POLICY "Users and co-members can view app usage" ON public.app_usage_reports FOR SELECT TO authenticated USING (user_id = auth.uid() OR is_co_member_with(user_id));
+DROP POLICY IF EXISTS "Users can insert own app usage" ON public.app_usage_reports;
+CREATE POLICY "Users can insert own app usage" ON public.app_usage_reports FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can update own app usage" ON public.app_usage_reports;
+CREATE POLICY "Users can update own app usage" ON public.app_usage_reports FOR UPDATE TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
--- Policies for Geofences
+-- Policies for Geofences (SECURED, NO ANON)
 DROP POLICY IF EXISTS "Allow authenticated read/write geofences" ON public.geofences;
-CREATE POLICY "Allow authenticated read/write geofences" ON public.geofences FOR ALL TO authenticated USING (true) WITH CHECK (true);
 DROP POLICY IF EXISTS "Allow anon read/write geofences" ON public.geofences;
-CREATE POLICY "Allow anon read/write geofences" ON public.geofences FOR ALL TO anon USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Members can view geofences" ON public.geofences;
+CREATE POLICY "Members can view geofences" ON public.geofences FOR SELECT TO authenticated USING (is_member_of(circle_id));
+DROP POLICY IF EXISTS "Members can create geofences" ON public.geofences;
+CREATE POLICY "Members can create geofences" ON public.geofences FOR INSERT TO authenticated WITH CHECK (is_member_of(circle_id));
+DROP POLICY IF EXISTS "Members can update geofences" ON public.geofences;
+CREATE POLICY "Members can update geofences" ON public.geofences FOR UPDATE TO authenticated USING (is_member_of(circle_id));
+DROP POLICY IF EXISTS "Members can delete geofences" ON public.geofences;
+CREATE POLICY "Members can delete geofences" ON public.geofences FOR DELETE TO authenticated USING (is_member_of(circle_id));
 
--- Policies for Geofence Events
+-- Policies for Geofence Events (SECURED, NO ANON)
 DROP POLICY IF EXISTS "Allow authenticated read/write geofence_events" ON public.geofence_events;
-CREATE POLICY "Allow authenticated read/write geofence_events" ON public.geofence_events FOR ALL TO authenticated USING (true) WITH CHECK (true);
 DROP POLICY IF EXISTS "Allow anon read/write geofence_events" ON public.geofence_events;
-CREATE POLICY "Allow anon read/write geofence_events" ON public.geofence_events FOR ALL TO anon USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Members can view geofence events" ON public.geofence_events;
+CREATE POLICY "Members can view geofence events" ON public.geofence_events FOR SELECT TO authenticated USING (is_member_of(circle_id));
+DROP POLICY IF EXISTS "Members can insert geofence events" ON public.geofence_events;
+CREATE POLICY "Members can insert geofence events" ON public.geofence_events FOR INSERT TO authenticated WITH CHECK (is_member_of(circle_id));
 
 -- Policies for Audio Requests
 DROP POLICY IF EXISTS "Members can view audio requests for their circles" ON public.audio_requests;
-CREATE POLICY "Members can view audio requests for their circles" ON public.audio_requests FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Members can view audio requests for their circles" ON public.audio_requests FOR SELECT TO authenticated USING (requester_id = auth.uid() OR target_id = auth.uid() OR (circle_id IS NOT NULL AND is_member_of(circle_id)));
 DROP POLICY IF EXISTS "Members can create audio requests" ON public.audio_requests;
-CREATE POLICY "Members can create audio requests" ON public.audio_requests FOR INSERT TO authenticated WITH CHECK (requester_id = auth.uid());
+CREATE POLICY "Members can create audio requests" ON public.audio_requests FOR INSERT TO authenticated WITH CHECK (requester_id = auth.uid() AND (circle_id IS NULL OR is_member_of(circle_id)));
 DROP POLICY IF EXISTS "Target or requester can update audio requests" ON public.audio_requests;
-CREATE POLICY "Target or requester can update audio requests" ON public.audio_requests FOR UPDATE TO authenticated USING (true);
+CREATE POLICY "Target or requester can update audio requests" ON public.audio_requests FOR UPDATE TO authenticated USING (requester_id = auth.uid() OR target_id = auth.uid()) WITH CHECK (requester_id = auth.uid() OR target_id = auth.uid());
+
+-- Policies for Location History
+DROP POLICY IF EXISTS "Users can insert own location history" ON public.location_history;
+CREATE POLICY "Users can insert own location history" ON public.location_history FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Location history readable by co-members" ON public.location_history;
+CREATE POLICY "Location history readable by co-members" ON public.location_history FOR SELECT TO authenticated USING (user_id = auth.uid() OR is_co_member_with(user_id));
 
 -- Realtime Setup
 DO $$
@@ -290,3 +360,4 @@ CREATE POLICY "Authenticated users can read audio" ON storage.objects FOR SELECT
 
 -- Reload Schema Cache
 NOTIFY pgrst, 'reload schema';
+
