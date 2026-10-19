@@ -145,6 +145,10 @@ class SupabaseService {
   }
 
   // ---------------- CIRCLES ----------------
+  String? currentCircleId;
+
+  Future<List<CircleModel>> getCircles() => getMyCircles();
+
   Future<List<CircleModel>> getMyCircles() async {
     final uid = currentUser?.id;
     if (uid == null) return [];
@@ -159,6 +163,9 @@ class SupabaseService {
       if (item['circles'] != null) {
         list.add(CircleModel.fromMap(item['circles'] as Map<String, dynamic>));
       }
+    }
+    if (list.isNotEmpty && currentCircleId == null) {
+      currentCircleId = list.first.id;
     }
     return list;
   }
@@ -526,7 +533,7 @@ class SupabaseService {
   Future<List<SosAlert>> getActiveAlerts([String? circleId]) async {
     var query = _client.from('sos_alerts').select('*, profiles(*)').eq('status', 'active');
     if (circleId != null) {
-      query = query.eq('circle_id', circleId);
+      query = query.or('circle_id.eq.$circleId,circle_id.is.null');
     }
     final data = await query.order('triggered_at', ascending: false);
 

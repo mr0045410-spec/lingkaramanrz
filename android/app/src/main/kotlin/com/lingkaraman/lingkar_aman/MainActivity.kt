@@ -25,7 +25,12 @@ import android.os.Process
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.graphics.PixelFormat
 import android.provider.Settings
+import android.view.Gravity
+import android.view.View
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -43,7 +48,10 @@ class MainActivity : FlutterActivity() {
     private val SOUND_CHANNEL = "com.lingkaraman.lingkar_aman/sound_settings"
     private val CHAT_NOTIFICATION_CHANNEL_ID = "lingkaraman_chat_alert"
     private val CHAT_NOTIFICATION_ID = 777888
+    private val EMERGENCY_NOTIFICATION_CHANNEL_ID = "lingkaraman_emergency_alert"
+    private val EMERGENCY_NOTIFICATION_ID = 999111
 
+    private var statusBarBlockerView: View? = null
     private var initialSosTrigger: Boolean = false
     private var initialLostModeLock: Boolean = false
     private var alarmPlayer: MediaPlayer? = null
@@ -456,6 +464,16 @@ class MainActivity : FlutterActivity() {
                     showChatNotification(title, message, soundId)
                     result.success(true)
                 }
+                "showEmergencyNotification" -> {
+                    val title = call.argument<String>("title") ?: "🚨 Mode HP Hilang Aktif"
+                    val message = call.argument<String>("message") ?: "Perangkat anggota sedang dikunci & dilacak."
+                    showEmergencyNotification(title, message)
+                    result.success(true)
+                }
+                "cancelEmergencyNotification" -> {
+                    cancelEmergencyNotification()
+                    result.success(true)
+                }
                 else -> result.notImplemented()
             }
         }
@@ -562,16 +580,158 @@ class MainActivity : FlutterActivity() {
                     )
                 }
                 window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+                // Hide system bars and enable immersive sticky mode
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    window.insetsController?.let { controller ->
+                        controller.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
+                        controller.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    }
+                } else {
+                    @Suppress("DEPRECATION")
+                    window.decorView.systemUiVisibility = (
+                        View.SYSTEM_UI_FLAG_FULLSCREEN or
+                        View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                        View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                        View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                        View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                        View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    )
+                }
+                enableStatusBarBlocker(true)
             } else {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
                     setShowWhenLocked(false)
                     setTurnScreenOn(false)
                 }
                 window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    window.insetsController?.show(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
+                } else {
+                    @Suppress("DEPRECATION")
+                    window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
+                }
+                enableStatusBarBlocker(false)
             }
         } catch (e: Exception) {
             e.printStackTrace()
         }
+    }
+
+    private fun getStatusBarHeight(): Int {
+        var result = 0
+        val resourceId = resources.getIdentifier("status_bar_height", "dimen", "android")
+        if (resourceId > 0) {
+            result = resources.getDimensionPixelSize(resourceId)
+        }
+        return if (result > 0) result else 120
+    }
+
+    private fun collapseStatusBar() {
+        try {
+            val statusBarService = getSystemService("statusbar")
+            val statusBarManager = Class.forName("android.app.StatusBarManager")
+            val collapse = statusBarManager.getMethod("collapsePanels")
+            collapse.invoke(statusBarService)
+        } catch (_: Exception) {}
+        try {
+            @Suppress("DEPRECATION")
+            sendBroadcast(Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS))
+        } catch (_: Exception) {}
+    }
+
+    private fun enableStatusBarBlocker(enable: Boolean) {
+        runOnUiThread {
+            try {
+                val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+                if (enable) {
+                    if (statusBarBlockerView == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(this)) {
+                        val overlayType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                        } else {
+                            @Suppress("DEPRECATION")
+                            WindowManager.LayoutParams.TYPE_PHONE
+                        }
+                        val params = WindowManager.LayoutParams(
+                            WindowManager.LayoutParams.MATCH_PARENT,
+                            getStatusBarHeight() + 70,
+                            overlayType,
+                            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                            PixelFormat.TRANSLUCENT
+                        ).apply {
+                            gravity = Gravity.TOP or Gravity.FILL_HORIZONTAL
+                        }
+
+                        val view = View(this).apply {
+                            setOnTouchListener { _, _ ->
+                                collapseStatusBar()
+                                true
+                            }
+                        }
+                        wm.addView(view, params)
+                        statusBarBlockerView = view
+                    }
+                } else {
+                    statusBarBlockerView?.let { view ->
+                        wm.removeView(view)
+                    }
+                    statusBarBlockerView = null
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    private fun showEmergencyNotification(title: String, message: String) {
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                EMERGENCY_NOTIFICATION_CHANNEL_ID,
+                "Peringatan Darurat & Mode Hilang",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Status pemantauan darurat dan mode HP hilang"
+                enableVibration(true)
+                setShowBadge(true)
+            }
+            manager.createNotificationChannel(channel)
+        }
+
+        val launchIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            EMERGENCY_NOTIFICATION_ID,
+            launchIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, EMERGENCY_NOTIFICATION_CHANNEL_ID)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(this)
+        }
+
+        val notif = builder
+            .setContentTitle(title)
+            .setContentText(message)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .setAutoCancel(false)
+            .setPriority(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Notification.PRIORITY_HIGH else Notification.PRIORITY_MAX)
+            .build()
+
+        manager.notify(EMERGENCY_NOTIFICATION_ID, notif)
+    }
+
+    private fun cancelEmergencyNotification() {
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        manager?.cancel(EMERGENCY_NOTIFICATION_ID)
     }
 
     private fun bringLockToFront() {
@@ -607,8 +767,12 @@ class MainActivity : FlutterActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (!hasFocus && isLostModeActive()) {
-            bringLockToFront()
+        if (isLostModeActive()) {
+            collapseStatusBar()
+            applyLockWindowFlags(true)
+            if (!hasFocus) {
+                bringLockToFront()
+            }
         }
     }
 
@@ -793,6 +957,8 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        enableStatusBarBlocker(false)
+        cancelEmergencyNotification()
         stopLoudAlarmInternal()
         if (activeSosChannel == activeSosChannel) {
             activeSosChannel = null

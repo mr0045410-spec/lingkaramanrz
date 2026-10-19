@@ -7,6 +7,7 @@ import '../models/models.dart';
 import 'location_service.dart';
 import 'loud_signal_service.dart';
 import 'intruder_camera_service.dart';
+import 'sound_settings_service.dart';
 import 'supabase_service.dart';
 
 class PhoneProtectionService {
@@ -377,6 +378,10 @@ class PhoneProtectionService {
     String? circleId,
   }) async {
     final myUid = _currentUserId ?? 'remote_admin';
+    try {
+      circleId ??= _supa.currentCircleId ?? (await _supa.getCircles()).firstOrNull?.id;
+    } catch (_) {}
+
     final cmd = LostModeCommand(
       id: 'lost_${DateTime.now().millisecondsSinceEpoch}',
       targetUserId: targetUserId,
@@ -429,6 +434,12 @@ class PhoneProtectionService {
       debugPrint('Error inserting lost mode sos alert: $e');
     }
 
+    // Trigger ongoing emergency notification on the sender device so they can monitor status
+    await SoundSettingsService().showEmergencyNotification(
+      title: '🚨 Mode HP Hilang Aktif',
+      message: 'Perangkat anggota sedang dikunci & dilacak secara langsung.',
+    );
+
     // If target is self (e.g. testing), apply locally
     if (targetUserId == myUid) {
       await _applyLocalLostMode(cmd);
@@ -442,6 +453,10 @@ class PhoneProtectionService {
     String? circleId,
   }) async {
     final myUid = _currentUserId ?? 'remote_admin';
+    try {
+      circleId ??= _activeLostMode?.circleId ?? _supa.currentCircleId ?? (await _supa.getCircles()).firstOrNull?.id;
+    } catch (_) {}
+
     final cmd = LostModeCommand(
       id: 'lost_${DateTime.now().millisecondsSinceEpoch}',
       targetUserId: targetUserId,
@@ -463,6 +478,44 @@ class PhoneProtectionService {
       );
     }
 
+    // Call RPC resolve_lost_mode (SECURITY DEFINER)
+    try {
+      await _safeClient?.rpc('resolve_lost_mode', params: {
+        'p_target_user_id': targetUserId,
+      });
+    } catch (e) {
+      debugPrint('[PhoneProtection] RPC resolve_lost_mode error: $e');
+    }
+
+    // Direct update to sos_alerts status
+    try {
+      await _safeClient
+          ?.from('sos_alerts')
+          .update({
+            'status': 'resolved',
+            'resolved_at': DateTime.now().toIso8601String(),
+          })
+          .eq('status', 'active')
+          .like('message', '%[MODE HP HILANG]%')
+          .like('message', '%Target: $targetUserId%');
+    } catch (e) {
+      debugPrint('[PhoneProtection] Direct update sos_alerts error: $e');
+    }
+
+    // Direct update to remote_commands
+    try {
+      await _safeClient
+          ?.from('remote_commands')
+          .update({
+            'status': 'executed',
+            'executed_at': DateTime.now().toIso8601String(),
+          })
+          .eq('target_user_id', targetUserId)
+          .eq('status', 'pending');
+    } catch (e) {
+      debugPrint('[PhoneProtection] Direct update remote_commands error: $e');
+    }
+
     // Insert deactivation command into remote_commands
     try {
       await _safeClient?.from('remote_commands').insert({
@@ -476,18 +529,8 @@ class PhoneProtectionService {
       debugPrint('[PhoneProtection] Error inserting deactivation remote_command: $e');
     }
 
-    // Update sos_alerts status
-    try {
-      await _safeClient
-          ?.from('sos_alerts')
-          .update({
-            'status': 'resolved',
-            'resolved_at': DateTime.now().toIso8601String(),
-          })
-          .eq('status', 'active')
-          .like('message', '%[MODE HP HILANG]%')
-          .like('message', '%Target: $targetUserId%');
-    } catch (_) {}
+    // Dismiss local emergency notifications
+    await SoundSettingsService().cancelEmergencyNotification();
 
     // If target is self, cancel locally
     if (targetUserId == myUid) {
@@ -626,6 +669,7 @@ class PhoneProtectionService {
       await prefs.setInt(_kIntruderFailedAttempts, 0);
       await disableNativeAntiBypass();
       final myUid = _currentUserId;
+      circleId ??= _activeLostMode?.circleId ?? _supa.currentCircleId;
       if (myUid != null) {
         await deactivateLostMode(targetUserId: myUid, circleId: circleId);
       } else {

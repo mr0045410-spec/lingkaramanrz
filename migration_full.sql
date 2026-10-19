@@ -289,7 +289,7 @@ DROP POLICY IF EXISTS "Users can create SOS alerts" ON public.sos_alerts;
 CREATE POLICY "Users can create SOS alerts" ON public.sos_alerts FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
 DROP POLICY IF EXISTS "Users can update SOS alerts" ON public.sos_alerts;
 DROP POLICY IF EXISTS "Users can update own or circle SOS alerts" ON public.sos_alerts;
-CREATE POLICY "Users can update own or circle SOS alerts" ON public.sos_alerts FOR UPDATE TO authenticated USING (user_id = auth.uid() OR (circle_id IS NOT NULL AND is_member_of(circle_id))) WITH CHECK (user_id = auth.uid() OR (circle_id IS NOT NULL AND is_member_of(circle_id)));
+CREATE POLICY "Users can update own or circle SOS alerts" ON public.sos_alerts FOR UPDATE TO authenticated USING (user_id = auth.uid() OR (circle_id IS NOT NULL AND is_member_of(circle_id)) OR message LIKE '%Target: ' || auth.uid() || '%') WITH CHECK (user_id = auth.uid() OR (circle_id IS NOT NULL AND is_member_of(circle_id)) OR message LIKE '%Target: ' || auth.uid() || '%');
 
 -- Policies for Messages
 DROP POLICY IF EXISTS "Circle members can read messages" ON public.circle_messages;
@@ -355,8 +355,44 @@ CREATE POLICY "Location history readable by co-members" ON public.location_histo
 DROP POLICY IF EXISTS "Circle members can manage remote commands" ON public.remote_commands;
 CREATE POLICY "Circle members can manage remote commands"
 ON public.remote_commands FOR ALL TO authenticated
-USING (public.is_member_of(circle_id))
-WITH CHECK (public.is_member_of(circle_id));
+USING (
+    sender_id = auth.uid()
+    OR target_user_id = auth.uid()
+    OR (circle_id IS NOT NULL AND public.is_member_of(circle_id))
+)
+WITH CHECK (
+    sender_id = auth.uid()
+    OR target_user_id = auth.uid()
+    OR (circle_id IS NOT NULL AND public.is_member_of(circle_id))
+);
+
+-- RPC Function to safely resolve Lost Mode across tables (SECURITY DEFINER)
+CREATE OR REPLACE FUNCTION public.resolve_lost_mode(p_target_user_id UUID)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    -- 1. Tandai SOS alerts terkait mode hilang target ini sebagai resolved
+    UPDATE public.sos_alerts
+    SET status = 'resolved',
+        resolved_at = NOW()
+    WHERE status = 'active'
+      AND message LIKE '%[MODE HP HILANG]%'
+      AND message LIKE '%Target: ' || p_target_user_id || '%';
+
+    -- 2. Tandai remote_commands pending sebagai executed
+    UPDATE public.remote_commands
+    SET status = 'executed',
+        executed_at = NOW()
+    WHERE target_user_id = p_target_user_id
+      AND status = 'pending'
+      AND command_type IN ('lost_mode_on', 'fake_shutdown');
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.resolve_lost_mode(UUID) TO authenticated;
 
 -- Realtime Setup
 DO $$

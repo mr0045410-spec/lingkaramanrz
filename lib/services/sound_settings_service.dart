@@ -141,4 +141,22 @@ class SoundSettingsService {
       });
     } catch (_) {}
   }
+
+  Future<void> showEmergencyNotification({
+    required String title,
+    required String message,
+  }) async {
+    try {
+      await _channel.invokeMethod('showEmergencyNotification', {
+        'title': title,
+        'message': message,
+      });
+    } catch (_) {}
+  }
+
+  Future<void> cancelEmergencyNotification() async {
+    try {
+      await _channel.invokeMethod('cancelEmergencyNotification');
+    } catch (_) {}
+  }
 }

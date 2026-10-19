@@ -42,6 +42,7 @@ class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription<IntruderAlertModel>? _intruderAlertSub;
   StreamSubscription<LastBreathBeaconModel>? _lastBreathSub;
   StreamSubscription<bool>? _gpsStatusSub;
+  StreamSubscription<LostModeCommand>? _lostModeSub;
 
   int _currentIndex = 0;
   List<CircleModel> _circles = [];
@@ -64,6 +65,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     _chatChannels.clear();
     _gpsStatusSub?.cancel();
+    _lostModeSub?.cancel();
     _audioService.stopListening();
     _sosTriggerSub?.cancel();
     _incomingSignalSub?.cancel();
@@ -239,14 +241,25 @@ class _HomeScreenState extends State<HomeScreen> {
       _geofenceService.subscribeToCircleEvents(_selectedCircle!.id);
     }
 
+    // Listen to real-time Lost Mode updates from other circle devices
+    _lostModeSub = _phoneProtectionService.onLostModeChanged.listen((cmd) {
+      if (mounted) {
+        _loadActiveAlerts();
+        if (!cmd.isActive) {
+          SoundSettingsService().cancelEmergencyNotification();
+        }
+      }
+    });
+
     // Listen to real-time SOS alerts globally
     _supa.subscribeToSosAlerts((alert) async {
       if (mounted) {
         _loadActiveAlerts();
 
+        final myUid = _supa.currentUser?.id;
+
         // Check if this is a remote Lost Mode command
         if (alert.message.contains('[MODE HP HILANG]')) {
-          final myUid = _supa.currentUser?.id;
           final cmd = LostModeCommand.parseFromSosMessage(
             alertId: alert.id,
             message: alert.message,
@@ -276,29 +289,38 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         }
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: Colors.red.shade800,
-            duration: const Duration(seconds: 8),
-            content: Row(
-              children: [
-                const Icon(Icons.warning, color: Colors.white),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'PERINGATAN SOS DARURAT! ${alert.message}',
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        // When alert is resolved or cancelled on other devices
+        if (alert.status == 'resolved' || alert.status == 'cancelled') {
+          await SoundSettingsService().cancelEmergencyNotification();
+          return;
+        }
+
+        // Only show emergency snackbar for currently active alerts
+        if (alert.status == 'active') {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: Colors.red.shade800,
+              duration: const Duration(seconds: 8),
+              content: Row(
+                children: [
+                  const Icon(Icons.warning, color: Colors.white),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'PERINGATAN SOS DARURAT! ${alert.message}',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
+              action: SnackBarAction(
+                label: 'LIHAT',
+                textColor: Colors.white,
+                onPressed: () => setState(() => _currentIndex = 3),
+              ),
             ),
-            action: SnackBarAction(
-              label: 'LIHAT',
-              textColor: Colors.white,
-              onPressed: () => setState(() => _currentIndex = 3),
-            ),
-          ),
-        );
+          );
+        }
       }
     });
 
@@ -477,6 +499,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _circles = circles;
           if (_circles.isNotEmpty && (_selectedCircle == null || !_circles.any((c) => c.id == _selectedCircle!.id))) {
             _selectedCircle = _circles.first;
+            _supa.currentCircleId = _selectedCircle!.id;
             _geofenceService.subscribeToCircleEvents(_selectedCircle!.id);
           }
         });

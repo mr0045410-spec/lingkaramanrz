@@ -112,7 +112,7 @@ class _FeaturesScreenState extends State<FeaturesScreen> {
             ElevatedButton(
               onPressed: () async {
                 final pin = pinCtrl.text.trim();
-                final success = await _phoneProtectionService.verifyUnlockPin(pin);
+                final success = await _phoneProtectionService.verifyUnlockPin(pin, circleId: widget.selectedCircle?.id);
                 if (ctx.mounted) {
                   Navigator.pop(ctx);
                 }

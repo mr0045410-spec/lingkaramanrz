@@ -253,5 +253,33 @@ void main() {
       expect(find.byType(TextField), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
+
+    test('verifyUnlockPin with correct PIN deactivates Lost Mode and emits inactive event', () async {
+      SharedPreferences.setMockInitialValues({
+        'lost_mode_pin': '9876',
+        'lost_mode_active': true,
+        'intruder_failed_attempts': 2,
+      });
+
+      LostModeCommand? latestCmd;
+      final sub = service.onLostModeChanged.listen((cmd) {
+        latestCmd = cmd;
+      });
+
+      // Wrong PIN
+      final wrongRes = await service.verifyUnlockPin('0000');
+      expect(wrongRes, isFalse);
+      expect(service.failedPinAttempts, 1);
+
+      // Correct PIN
+      final okRes = await service.verifyUnlockPin('9876');
+      await Future.delayed(Duration.zero);
+      expect(okRes, isTrue);
+      expect(service.failedPinAttempts, 0);
+      expect(latestCmd, isNotNull);
+      expect(latestCmd!.isActive, isFalse);
+
+      await sub.cancel();
+    });
   });
 }
