@@ -16,7 +16,11 @@ CREATE TABLE IF NOT EXISTS public.profiles (
 
 -- Trigger auto-insert / update profile when auth.users is created
 CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 BEGIN
     INSERT INTO public.profiles (id, full_name, phone_number, avatar_url)
     VALUES (
@@ -31,7 +35,7 @@ BEGIN
         avatar_url = COALESCE(EXCLUDED.avatar_url, public.profiles.avatar_url);
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
@@ -153,17 +157,26 @@ CREATE TABLE IF NOT EXISTS public.audio_requests (
 
 -- Helper functions
 CREATE OR REPLACE FUNCTION public.is_member_of(p_circle_id UUID)
-RETURNS BOOLEAN AS $$
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
 BEGIN
     RETURN EXISTS (
         SELECT 1 FROM public.circle_members
         WHERE circle_id = p_circle_id AND user_id = auth.uid()
     );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+$$;
 
 CREATE OR REPLACE FUNCTION public.join_circle_by_code(p_code TEXT)
-RETURNS UUID AS $$
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 DECLARE
     v_circle_id UUID;
 BEGIN
@@ -178,10 +191,15 @@ BEGIN
 
     RETURN v_circle_id;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
 CREATE OR REPLACE FUNCTION public.is_co_member_with(p_user_id UUID)
-RETURNS BOOLEAN AS $$
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
 BEGIN
     IF p_user_id = auth.uid() THEN
         RETURN TRUE;
@@ -192,13 +210,38 @@ BEGIN
         WHERE cm1.user_id = auth.uid() AND cm2.user_id = p_user_id
     );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+$$;
 
 CREATE OR REPLACE FUNCTION public.normalize_circle_roles(p_circle_id UUID)
-RETURNS INTEGER AS $$
+RETURNS INTEGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 DECLARE
     v_updated_count INTEGER;
 BEGIN
+    -- Otorisasi: Pemanggil harus creator circle ATAU admin di circle tersebut
+    IF auth.uid() IS NULL THEN
+        RAISE EXCEPTION 'unauthorized';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM public.circles c
+        WHERE c.id = p_circle_id
+          AND (
+            c.created_by = auth.uid()
+            OR EXISTS (
+                SELECT 1 FROM public.circle_members cm
+                WHERE cm.circle_id = p_circle_id
+                  AND cm.user_id = auth.uid()
+                  AND cm.role = 'admin'
+            )
+          )
+    ) THEN
+        RAISE EXCEPTION 'unauthorized';
+    END IF;
+
     UPDATE public.circle_members cm
     SET role = 'member'
     FROM public.circles c
@@ -210,7 +253,7 @@ BEGIN
     GET DIAGNOSTICS v_updated_count = ROW_COUNT;
     RETURN v_updated_count;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
 -- 12. Location History Table
 CREATE TABLE IF NOT EXISTS public.location_history (
@@ -238,6 +281,22 @@ CREATE TABLE IF NOT EXISTS public.remote_commands (
     executed_at TIMESTAMPTZ
 );
 
+-- 14. User Devices Table (FCM Push Notifications & Wakeup)
+CREATE TABLE IF NOT EXISTS public.user_devices (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    fcm_token TEXT NOT NULL,
+    platform TEXT NOT NULL DEFAULT 'android',
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT user_devices_user_fcm_unique UNIQUE (user_id, fcm_token)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_devices_user_id ON public.user_devices(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_devices_fcm_token ON public.user_devices(fcm_token);
+
 -- Enable RLS
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.circles ENABLE ROW LEVEL SECURITY;
@@ -252,6 +311,7 @@ ALTER TABLE public.geofence_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audio_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.location_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.remote_commands ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_devices ENABLE ROW LEVEL SECURITY;
 
 -- Policies for Profiles
 DROP POLICY IF EXISTS "Profiles are readable by authenticated users" ON public.profiles;
@@ -366,6 +426,25 @@ WITH CHECK (
     OR (circle_id IS NOT NULL AND public.is_member_of(circle_id))
 );
 
+-- Policies for User Devices (FCM Push Tokens)
+DROP POLICY IF EXISTS "Users can manage own devices" ON public.user_devices;
+CREATE POLICY "Users can manage own devices"
+    ON public.user_devices
+    FOR ALL
+    TO authenticated
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Circle members can read circle members devices" ON public.user_devices;
+CREATE POLICY "Circle members can read circle members devices"
+    ON public.user_devices
+    FOR SELECT
+    TO authenticated
+    USING (
+        auth.uid() = user_id
+        OR is_co_member_with(user_id)
+    );
+
 -- RPC Function to safely resolve Lost Mode across tables (SECURITY DEFINER)
 CREATE OR REPLACE FUNCTION public.resolve_lost_mode(p_target_user_id UUID)
 RETURNS void
@@ -374,6 +453,11 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
+    -- Otorisasi: Hanya target sendiri ATAU rekan se-circle yang boleh resolve
+    IF auth.uid() IS NULL OR (auth.uid() != p_target_user_id AND NOT public.is_co_member_with(p_target_user_id)) THEN
+        RAISE EXCEPTION 'unauthorized';
+    END IF;
+
     -- 1. Tandai SOS alerts terkait mode hilang target ini sebagai resolved
     UPDATE public.sos_alerts
     SET status = 'resolved',
@@ -397,6 +481,8 @@ GRANT EXECUTE ON FUNCTION public.resolve_lost_mode(UUID) TO authenticated;
 -- Realtime Setup
 DO $$
 BEGIN
+    ALTER TABLE public.sos_alerts REPLICA IDENTITY FULL;
+    ALTER TABLE public.remote_commands REPLICA IDENTITY FULL;
     ALTER PUBLICATION supabase_realtime ADD TABLE public.user_locations;
     ALTER PUBLICATION supabase_realtime ADD TABLE public.sos_alerts;
     ALTER PUBLICATION supabase_realtime ADD TABLE public.circle_messages;
