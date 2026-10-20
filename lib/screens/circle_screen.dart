@@ -6,6 +6,8 @@ import '../services/geofence_service.dart';
 import '../services/supabase_service.dart';
 import '../widgets/geofence_map_picker.dart';
 import '../widgets/member_detail_sheet.dart';
+import '../services/member_nickname_service.dart';
+import '../services/sound_settings_service.dart';
 
 class CircleScreen extends StatefulWidget {
   final List<CircleModel> circles;
@@ -38,10 +40,87 @@ class _CircleScreenState extends State<CircleScreen> with SingleTickerProviderSt
   List<GeofenceEventModel> _geofenceEvents = [];
   bool _isLoading = false;
 
+  void _onNicknamesChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _showEditNicknameDialog(String userId, String? currentNickname, String fullName) async {
+    final ctrl = TextEditingController(text: currentNickname ?? '');
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: const [
+            Icon(Icons.badge_outlined, color: Colors.indigo),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text('Nama Panggilan Anggota', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Ganti nama tampilan untuk $fullName (hanya terlihat oleh Anda).',
+              style: const TextStyle(fontSize: 13, color: Colors.black54),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Nama Panggilan',
+                hintText: 'Misal: Ayah, Ibu, Kakak, Adek',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          if (currentNickname != null && currentNickname.isNotEmpty)
+            TextButton(
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              onPressed: () async {
+                Navigator.pop(ctx);
+                await MemberNicknameService.instance.removeNickname(userId);
+                if (mounted) setState(() {});
+              },
+              child: const Text('Reset Asli'),
+            ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.indigo,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () async {
+              final val = ctrl.text.trim();
+              Navigator.pop(ctx);
+              if (val.isEmpty) {
+                await MemberNicknameService.instance.removeNickname(userId);
+              } else {
+                await MemberNicknameService.instance.setNickname(userId, val);
+              }
+              if (mounted) setState(() {});
+            },
+            child: const Text('Simpan'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    MemberNicknameService.instance.addListener(_onNicknamesChanged);
     if (widget.selectedCircle != null) {
       _loadData(widget.selectedCircle!.id);
       _listenToChat(widget.selectedCircle!.id);
@@ -61,6 +140,7 @@ class _CircleScreenState extends State<CircleScreen> with SingleTickerProviderSt
 
   @override
   void dispose() {
+    MemberNicknameService.instance.removeListener(_onNicknamesChanged);
     _tabController.dispose();
     _msgController.dispose();
     _chatScrollController.dispose();
@@ -74,6 +154,32 @@ class _CircleScreenState extends State<CircleScreen> with SingleTickerProviderSt
           _messages.add(newMsg);
         });
         _scrollToBottom();
+
+        // Notifikasi & nada chat jika pesan berasal dari anggota lain
+        if (newMsg.userId != _supa.currentUser?.id) {
+          SoundSettingsService().previewSound('bubble_pop');
+          if (_tabController.index != 2) {
+            final nickname = MemberNicknameService.instance.getNickname(newMsg.userId);
+            final sName = nickname ?? newMsg.senderProfile?.fullName ?? 'Anggota';
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                behavior: SnackBarBehavior.floating,
+                backgroundColor: const Color(0xFF1E3A8A),
+                duration: const Duration(seconds: 3),
+                content: Text(
+                  '💬 $sName: ${newMsg.message}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                action: SnackBarAction(
+                  label: 'Buka Obrolan',
+                  textColor: Colors.amberAccent,
+                  onPressed: () => _tabController.animateTo(2),
+                ),
+              ),
+            );
+          }
+        }
       }
     });
   }
@@ -347,17 +453,25 @@ class _CircleScreenState extends State<CircleScreen> with SingleTickerProviderSt
                               itemBuilder: (ctx, i) {
                                 final m = _members[i];
                                 final isMe = m.userId == _supa.currentUser?.id;
-                                final name = isMe ? 'Saya' : (m.profile?.fullName ?? 'Anggota');
+                                final nickname = MemberNicknameService.instance.getNickname(m.userId);
+                                final fullName = m.profile?.fullName ?? 'Anggota';
+                                final name = isMe ? 'Saya' : (nickname ?? fullName);
+                                final avatarUrl = m.profile?.avatarUrl;
                                 final loc = m.location;
 
                                 return ListTile(
                                   onTap: () => MemberDetailSheet.show(context, m, circle),
                                   leading: CircleAvatar(
                                     backgroundColor: isMe ? Colors.blue : Colors.teal,
-                                    child: Text(
-                                      name.isNotEmpty ? name[0].toUpperCase() : '?',
-                                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                                    ),
+                                    backgroundImage: (avatarUrl != null && avatarUrl.isNotEmpty)
+                                        ? NetworkImage(avatarUrl)
+                                        : null,
+                                    child: (avatarUrl == null || avatarUrl.isEmpty)
+                                        ? Text(
+                                            name.isNotEmpty ? name[0].toUpperCase() : '?',
+                                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                                          )
+                                        : null,
                                   ),
                                   title: Row(
                                     children: [
@@ -397,16 +511,28 @@ class _CircleScreenState extends State<CircleScreen> with SingleTickerProviderSt
                                       ],
                                     ],
                                   ),
-                                  subtitle: loc != null
-                                      ? Text(
-                                          'Baterai: ${loc.batteryLevel}% ${loc.isCharging ? "(Mengisi)" : ""} • '
-                                          'Update: ${DateFormat('HH:mm').format(loc.updatedAt)}',
-                                          style: const TextStyle(fontSize: 12),
-                                        )
-                                      : const Text(
-                                          'Lokasi belum terdeteksi',
-                                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                                  subtitle: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      if (!isMe && nickname != null)
+                                        Padding(
+                                          padding: const EdgeInsets.only(bottom: 2),
+                                          child: Text(
+                                            'Nama asli: $fullName',
+                                            style: TextStyle(fontSize: 11, color: Colors.indigo.shade700, fontWeight: FontWeight.w500),
+                                          ),
                                         ),
+                                      loc != null
+                                          ? Text(
+                                              'Baterai: ${loc.batteryLevel}% ${loc.isCharging ? "(Mengisi)" : ""} • Update: ${DateFormat('HH:mm').format(loc.updatedAt)}',
+                                              style: const TextStyle(fontSize: 12),
+                                            )
+                                          : const Text(
+                                              'Lokasi belum terdeteksi',
+                                              style: TextStyle(fontSize: 12, color: Colors.grey),
+                                            ),
+                                    ],
+                                  ),
                                   trailing: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
@@ -421,7 +547,11 @@ class _CircleScreenState extends State<CircleScreen> with SingleTickerProviderSt
                                           size: 20,
                                         ),
                                       if (!isMe) ...[
-                                        const SizedBox(width: 4),
+                                        IconButton(
+                                          icon: const Icon(Icons.edit_note_rounded, color: Colors.indigo, size: 22),
+                                          tooltip: 'Ubah Nama Panggilan',
+                                          onPressed: () => _showEditNicknameDialog(m.userId, nickname, fullName),
+                                        ),
                                         IconButton(
                                           icon: const Icon(Icons.mic, color: Colors.deepOrange, size: 22),
                                           tooltip: 'Dengar Suara Sekitar (15s)',
@@ -457,30 +587,53 @@ class _CircleScreenState extends State<CircleScreen> with SingleTickerProviderSt
                                     itemBuilder: (ctx, i) {
                                       final msg = _messages[i];
                                       final isMe = msg.userId == _supa.currentUser?.id;
-                                      final senderName = isMe ? 'Saya' : (msg.senderProfile?.fullName ?? 'Anggota');
+                                      final nickname = MemberNicknameService.instance.getNickname(msg.userId);
+                                      final fullName = msg.senderProfile?.fullName ?? 'Anggota';
+                                      final senderName = isMe ? 'Saya' : (nickname ?? fullName);
+                                      final senderAvatar = msg.senderProfile?.avatarUrl;
 
-                                      return Align(
-                                        alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-                                        child: Container(
-                                          margin: const EdgeInsets.symmetric(vertical: 4),
-                                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                          decoration: BoxDecoration(
-                                            color: isMe ? Colors.indigo.shade600 : Colors.grey.shade200,
-                                            borderRadius: BorderRadius.circular(16),
-                                          ),
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                                            children: [
-                                              if (!isMe)
-                                                Text(
-                                                  senderName,
-                                                  style: TextStyle(
-                                                    fontSize: 11,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: Colors.indigo.shade900,
-                                                  ),
+                                      return Padding(
+                                        padding: const EdgeInsets.symmetric(vertical: 4),
+                                        child: Row(
+                                          mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+                                          crossAxisAlignment: CrossAxisAlignment.end,
+                                          children: [
+                                            if (!isMe) ...[
+                                              CircleAvatar(
+                                                radius: 14,
+                                                backgroundColor: Colors.indigo.shade100,
+                                                backgroundImage: (senderAvatar != null && senderAvatar.isNotEmpty)
+                                                    ? NetworkImage(senderAvatar)
+                                                    : null,
+                                                child: (senderAvatar == null || senderAvatar.isEmpty)
+                                                    ? Text(
+                                                        senderName.isNotEmpty ? senderName[0].toUpperCase() : '?',
+                                                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.indigo.shade900),
+                                                      )
+                                                    : null,
+                                              ),
+                                              const SizedBox(width: 6),
+                                            ],
+                                            Flexible(
+                                              child: Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                                decoration: BoxDecoration(
+                                                  color: isMe ? Colors.indigo.shade600 : Colors.grey.shade200,
+                                                  borderRadius: BorderRadius.circular(16),
                                                 ),
+                                                child: Column(
+                                                  crossAxisAlignment:
+                                                      isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                                  children: [
+                                                    if (!isMe)
+                                                      Text(
+                                                        senderName,
+                                                        style: TextStyle(
+                                                          fontSize: 11,
+                                                          fontWeight: FontWeight.bold,
+                                                          color: Colors.indigo.shade900,
+                                                        ),
+                                                      ),
                                               Text(
                                                 msg.message,
                                                 style: TextStyle(
@@ -496,8 +649,11 @@ class _CircleScreenState extends State<CircleScreen> with SingleTickerProviderSt
                                                   color: isMe ? Colors.white70 : Colors.grey.shade600,
                                                 ),
                                               ),
-                                            ],
-                                          ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       );
                                     },

@@ -58,3 +58,6 @@ bin/
 *.ps1
 
 
+test/target_session.json
+test/injected_prefs.xml
+test/*_test.dart

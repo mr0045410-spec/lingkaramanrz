@@ -18,7 +18,8 @@ class LostModeScreen extends StatefulWidget {
   State<LostModeScreen> createState() => _LostModeScreenState();
 }
 
-class _LostModeScreenState extends State<LostModeScreen> with SingleTickerProviderStateMixin {
+class _LostModeScreenState extends State<LostModeScreen>
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final PhoneProtectionService _protectionService = PhoneProtectionService();
   final LoudSignalService _loudSignal = LoudSignalService();
 
@@ -33,6 +34,10 @@ class _LostModeScreenState extends State<LostModeScreen> with SingleTickerProvid
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // Sembunyikan status bar dan bar sistem agar fullscreen murni
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+
     _isFakeShutdown = widget.command.enableFakeShutdown;
     _isSirenActive = widget.command.enableSiren;
 
@@ -57,10 +62,6 @@ class _LostModeScreenState extends State<LostModeScreen> with SingleTickerProvid
       );
     }
 
-    if (_isFakeShutdown) {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    }
-
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         ScaffoldMessenger.of(context).clearSnackBars();
@@ -69,7 +70,15 @@ class _LostModeScreenState extends State<LostModeScreen> with SingleTickerProvid
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _pulseController.dispose();
     _tapResetTimer?.cancel();
@@ -239,7 +248,6 @@ class _LostModeScreenState extends State<LostModeScreen> with SingleTickerProvid
 
                           setDialogState(() => isChecking = true);
                           final nav = Navigator.of(context);
-                          final messenger = ScaffoldMessenger.of(context);
 
                           final ok = await _protectionService.verifyUnlockPin(
                             pin,
@@ -253,12 +261,6 @@ class _LostModeScreenState extends State<LostModeScreen> with SingleTickerProvid
                               if (nav.canPop()) {
                                 nav.pop();
                               }
-                              messenger.showSnackBar(
-                                const SnackBar(
-                                  content: Text('Kunci berhasil dibuka. Mode HP Hilang nonaktif.'),
-                                  backgroundColor: Colors.teal,
-                                ),
-                              );
                             }
                           } else {
                             final attempts = _protectionService.failedPinAttempts;
@@ -284,6 +286,9 @@ class _LostModeScreenState extends State<LostModeScreen> with SingleTickerProvid
         );
       },
     );
+    if (mounted) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    }
   }
 
   @override

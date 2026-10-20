@@ -165,7 +165,8 @@ class PhoneProtectionService {
             .eq('target_user_id', _currentUserId!)
             .eq('status', 'pending')
             .order('created_at', ascending: false)
-            .limit(1);
+            .limit(1)
+            .timeout(const Duration(seconds: 3));
         if (pendingCommands != null && pendingCommands.isNotEmpty) {
           await _handleRemoteCommandRecord(pendingCommands.first);
         }
@@ -182,8 +183,6 @@ class PhoneProtectionService {
     final client = _safeClient;
     if (client == null) return;
 
-    final myUid = _currentUserId;
-
     // 1. Realtime broadcast channel for instant multi-device synchronisation
     _channel = client.channel('phone_protection');
 
@@ -193,7 +192,8 @@ class PhoneProtectionService {
           callback: (payload) async {
             try {
               final cmd = LostModeCommand.fromMap(payload);
-              if (cmd.targetUserId == myUid) {
+              final currentUid = _currentUserId;
+              if (cmd.targetUserId == currentUid) {
                 await _applyLocalLostMode(cmd);
               }
               _lostModeController.add(cmd);
@@ -207,7 +207,8 @@ class PhoneProtectionService {
           callback: (payload) async {
             try {
               final targetUserId = payload['target_user_id'] as String?;
-              if (targetUserId == myUid) {
+              final currentUid = _currentUserId;
+              if (targetUserId == currentUid) {
                 await executeLocalVaultLock();
               }
             } catch (e) {
@@ -240,6 +241,7 @@ class PhoneProtectionService {
         .subscribe();
 
     // 2. Realtime Postgres Changes listener pada tabel public.remote_commands
+    final myUid = _currentUserId;
     if (myUid != null) {
       _remoteCommandsChannel = client
           .channel('public:remote_commands:$myUid')
@@ -444,6 +446,7 @@ class PhoneProtectionService {
     if (targetUserId == myUid) {
       await _applyLocalLostMode(cmd);
     }
+    _lostModeController.add(cmd);
 
     return cmd;
   }
@@ -470,34 +473,58 @@ class PhoneProtectionService {
       updatedAt: DateTime.now(),
     );
 
-    // Broadcast deactivation
+    // Apply locally first so device is freed immediately
+    if (targetUserId == myUid || (_activeLostMode != null && _activeLostMode!.targetUserId == targetUserId)) {
+      await _applyLocalLostMode(cmd);
+    }
+    _lostModeController.add(cmd);
+    await SoundSettingsService().cancelEmergencyNotification();
+
+    // Broadcast deactivation with timeout
     if (_channel != null) {
-      await _channel!.sendBroadcastMessage(
-        event: 'lost_mode',
-        payload: cmd.toMap(),
-      );
+      try {
+        await _channel!.sendBroadcastMessage(
+          event: 'lost_mode',
+          payload: cmd.toMap(),
+        ).timeout(const Duration(seconds: 4));
+      } catch (e) {
+        debugPrint('[PhoneProtection] Broadcast error: $e');
+      }
     }
 
     // Call RPC resolve_lost_mode (SECURITY DEFINER)
     try {
       await _safeClient?.rpc('resolve_lost_mode', params: {
         'p_target_user_id': targetUserId,
-      });
+      }).timeout(const Duration(seconds: 4));
     } catch (e) {
       debugPrint('[PhoneProtection] RPC resolve_lost_mode error: $e');
     }
 
-    // Direct update to sos_alerts status
+    // Direct update to sos_alerts status by specific alert ID
     try {
-      await _safeClient
+      final activeAlerts = await _safeClient
           ?.from('sos_alerts')
-          .update({
-            'status': 'resolved',
-            'resolved_at': DateTime.now().toIso8601String(),
-          })
+          .select('id, message')
           .eq('status', 'active')
-          .like('message', '%[MODE HP HILANG]%')
-          .like('message', '%Target: $targetUserId%');
+          .timeout(const Duration(seconds: 4));
+
+      if (activeAlerts != null && activeAlerts.isNotEmpty) {
+        for (final row in activeAlerts) {
+          final msg = (row['message'] as String?) ?? '';
+          if (msg.contains('[MODE HP HILANG]') && msg.contains(targetUserId)) {
+            final alertId = row['id'];
+            await _safeClient
+                ?.from('sos_alerts')
+                .update({
+                  'status': 'resolved',
+                  'resolved_at': DateTime.now().toIso8601String(),
+                })
+                .eq('id', alertId)
+                .timeout(const Duration(seconds: 3));
+          }
+        }
+      }
     } catch (e) {
       debugPrint('[PhoneProtection] Direct update sos_alerts error: $e');
     }
@@ -511,7 +538,8 @@ class PhoneProtectionService {
             'executed_at': DateTime.now().toIso8601String(),
           })
           .eq('target_user_id', targetUserId)
-          .eq('status', 'pending');
+          .eq('status', 'pending')
+          .timeout(const Duration(seconds: 4));
     } catch (e) {
       debugPrint('[PhoneProtection] Direct update remote_commands error: $e');
     }
@@ -524,23 +552,33 @@ class PhoneProtectionService {
         'target_user_id': targetUserId,
         'command_type': 'lost_mode_off',
         'status': 'pending',
-      });
+      }).timeout(const Duration(seconds: 4));
     } catch (e) {
       debugPrint('[PhoneProtection] Error inserting deactivation remote_command: $e');
-    }
-
-    // Dismiss local emergency notifications
-    await SoundSettingsService().cancelEmergencyNotification();
-
-    // If target is self, cancel locally
-    if (targetUserId == myUid) {
-      await _applyLocalLostMode(cmd);
-    } else if (_activeLostMode != null && _activeLostMode!.targetUserId == targetUserId) {
-      await _applyLocalLostMode(cmd);
     }
   }
 
   Future<void> applyRemoteLostMode(LostModeCommand cmd) async {
+    await _applyLocalLostMode(cmd);
+  }
+
+  Future<void> applyRemoteLostModeFromPayload({
+    required String contactPhone,
+    required String message,
+    required bool enableSiren,
+    required bool enableFakeShutdown,
+  }) async {
+    final cmd = LostModeCommand(
+      id: 'fcm_remote_${DateTime.now().millisecondsSinceEpoch}',
+      targetUserId: _currentUserId ?? '',
+      senderId: 'fcm_push',
+      isActive: true,
+      contactPhone: contactPhone,
+      message: message,
+      enableSiren: enableSiren,
+      enableFakeShutdown: enableFakeShutdown,
+      updatedAt: DateTime.now(),
+    );
     await _applyLocalLostMode(cmd);
   }
 
@@ -551,12 +589,18 @@ class PhoneProtectionService {
     try {
       final res = await _safeClient
           ?.from('sos_alerts')
-          .select()
+          .select('id, message')
           .eq('status', 'active')
-          .like('message', '%[MODE HP HILANG]%')
-          .like('message', '%Target: $targetUserId%')
-          .limit(1);
-      return res != null && res.isNotEmpty;
+          .timeout(const Duration(seconds: 3));
+      if (res != null && res.isNotEmpty) {
+        for (final row in res) {
+          final msg = (row['message'] as String?) ?? '';
+          if (msg.contains('[MODE HP HILANG]') && msg.contains(targetUserId)) {
+            return true;
+          }
+        }
+      }
+      return false;
     } catch (_) {
       return false;
     }
@@ -571,24 +615,28 @@ class PhoneProtectionService {
           ?.from('sos_alerts')
           .select()
           .eq('status', 'active')
-          .like('message', '%[MODE HP HILANG]%')
-          .like('message', '%Target: $myUid%')
           .order('triggered_at', ascending: false)
-          .limit(1);
+          .limit(10)
+          .timeout(const Duration(seconds: 3));
 
       if (res != null && res.isNotEmpty) {
-        final row = res.first;
-        final cmd = LostModeCommand.parseFromSosMessage(
-          alertId: row['id'] as String,
-          message: row['message'] as String,
-          senderId: row['user_id'] as String,
-          circleId: row['circle_id'] as String?,
-        );
-        if (cmd != null) {
-          await _applyLocalLostMode(cmd);
-          return cmd;
+        for (final row in res) {
+          final msg = (row['message'] as String?) ?? '';
+          if (msg.contains('[MODE HP HILANG]') && msg.contains(myUid)) {
+            final cmd = LostModeCommand.parseFromSosMessage(
+              alertId: row['id'] as String,
+              message: row['message'] as String,
+              senderId: row['user_id'] as String,
+              circleId: row['circle_id'] as String?,
+            );
+            if (cmd != null) {
+              await _applyLocalLostMode(cmd);
+              return cmd;
+            }
+          }
         }
-      } else if (_activeLostMode != null) {
+      }
+      if (_activeLostMode != null) {
         final deactivateCmd = LostModeCommand(
           id: 'unlocked',
           targetUserId: myUid,
@@ -668,23 +716,34 @@ class PhoneProtectionService {
       _failedPinAttempts = 0;
       await prefs.setInt(_kIntruderFailedAttempts, 0);
       await disableNativeAntiBypass();
+      await _loudSignal.stopNativeAlarm();
+
       final myUid = _currentUserId;
       circleId ??= _activeLostMode?.circleId ?? _supa.currentCircleId;
+
+      final cmd = LostModeCommand(
+        id: 'unlocked_${DateTime.now().millisecondsSinceEpoch}',
+        targetUserId: myUid ?? '',
+        senderId: myUid ?? '',
+        circleId: circleId,
+        isActive: false,
+        contactPhone: '',
+        message: 'Mode HP Hilang dinonaktifkan.',
+        enableSiren: false,
+        enableFakeShutdown: false,
+        updatedAt: DateTime.now(),
+      );
+
+      // Local state is deactivated immediately
+      await _applyLocalLostMode(cmd);
+      await SoundSettingsService().cancelEmergencyNotification();
+
       if (myUid != null) {
-        await deactivateLostMode(targetUserId: myUid, circleId: circleId);
-      } else {
-        await _applyLocalLostMode(
-          LostModeCommand(
-            id: 'unlocked_${DateTime.now().millisecondsSinceEpoch}',
-            targetUserId: '',
-            senderId: '',
-            isActive: false,
-            contactPhone: '',
-            message: '',
-            enableSiren: false,
-            enableFakeShutdown: false,
-            updatedAt: DateTime.now(),
-          ),
+        // Sync deactivation to Supabase & Circle devices concurrently
+        unawaited(
+          deactivateLostMode(targetUserId: myUid, circleId: circleId).catchError((e) {
+            debugPrint('[PhoneProtection] Error deactivating lost mode: $e');
+          }),
         );
       }
       return true;

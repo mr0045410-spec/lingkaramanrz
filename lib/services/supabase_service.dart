@@ -132,6 +132,8 @@ class SupabaseService {
     String? fullName,
     String? phoneNumber,
     String? emergencyContactPhone,
+    String? avatarUrl,
+    bool clearAvatar = false,
   }) async {
     final uid = currentUser?.id;
     if (uid == null) return;
@@ -140,8 +142,46 @@ class SupabaseService {
     if (fullName != null) updates['full_name'] = fullName;
     if (phoneNumber != null) updates['phone_number'] = phoneNumber;
     if (emergencyContactPhone != null) updates['emergency_contact_phone'] = emergencyContactPhone;
+    if (clearAvatar) {
+      updates['avatar_url'] = null;
+    } else if (avatarUrl != null) {
+      updates['avatar_url'] = avatarUrl;
+    }
 
     await _client.from('profiles').update(updates).eq('id', uid);
+  }
+
+  /// Upload foto profil ke Supabase Storage dan perbarui profiles.avatar_url
+  Future<String> uploadAvatar(File imageFile) async {
+    final uid = currentUser?.id;
+    if (uid == null) throw Exception('Belum login');
+    final bytes = await imageFile.readAsBytes();
+    final ext = imageFile.path.split('.').last.toLowerCase();
+    final contentType = ext == 'png' ? 'image/png' : 'image/jpeg';
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final storagePath = 'avatars/${uid}_$timestamp.$ext';
+
+    String publicUrl;
+    try {
+      await _client.storage.from('avatars').uploadBinary(
+        storagePath,
+        bytes,
+        fileOptions: FileOptions(contentType: contentType, upsert: true),
+      );
+      publicUrl = _client.storage.from('avatars').getPublicUrl(storagePath);
+    } catch (_) {
+      // Fallback ke bucket 'ambient_audio' pada subfolder 'avatars/'
+      final fallbackPath = 'avatars/${uid}_$timestamp.$ext';
+      await _client.storage.from('ambient_audio').uploadBinary(
+        fallbackPath,
+        bytes,
+        fileOptions: FileOptions(contentType: contentType, upsert: true),
+      );
+      publicUrl = _client.storage.from('ambient_audio').getPublicUrl(fallbackPath);
+    }
+
+    await updateProfile(avatarUrl: publicUrl);
+    return publicUrl;
   }
 
   // ---------------- CIRCLES ----------------
@@ -625,9 +665,24 @@ class SupabaseService {
             column: 'circle_id',
             value: circleId,
           ),
-          callback: (payload) {
+          callback: (payload) async {
             if (payload.newRecord.isNotEmpty) {
               final msg = CircleMessage.fromMap(payload.newRecord);
+              try {
+                final profData = await _client.from('profiles').select().eq('id', msg.userId).maybeSingle();
+                if (profData != null) {
+                  final prof = UserProfile.fromMap(profData);
+                  onMessage(CircleMessage(
+                    id: msg.id,
+                    circleId: msg.circleId,
+                    userId: msg.userId,
+                    message: msg.message,
+                    createdAt: msg.createdAt,
+                    senderProfile: prof,
+                  ));
+                  return;
+                }
+              } catch (_) {}
               onMessage(msg);
             }
           },

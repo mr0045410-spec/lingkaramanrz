@@ -1,18 +1,22 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/models.dart';
 import '../services/audio_service.dart';
+import '../services/battery_optimization_service.dart';
 import '../services/geofence_service.dart';
 import '../services/location_service.dart';
 import '../services/loud_signal_service.dart';
 import '../services/phone_protection_service.dart';
+import '../services/oem_security_service.dart';
 import '../services/sos_trigger_service.dart';
 import '../services/sound_settings_service.dart';
+import 'package:permission_handler/permission_handler.dart';
+import '../services/member_nickname_service.dart';
 import '../services/supabase_service.dart';
 import 'circle_screen.dart';
-import 'features_screen.dart';
 import 'lost_mode_screen.dart';
 import 'map_view.dart';
 import 'profile_screen.dart';
@@ -26,7 +30,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final SupabaseService _supa = SupabaseService();
   final LocationService _locService = LocationService();
   final AudioService _audioService = AudioService();
@@ -43,18 +47,48 @@ class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription<LastBreathBeaconModel>? _lastBreathSub;
   StreamSubscription<bool>? _gpsStatusSub;
   StreamSubscription<LostModeCommand>? _lostModeSub;
+  Timer? _alertRefreshTimer;
+  bool _isLostModeScreenOpen = false;
+  bool _isAccessibilityEnabled = true;
+
+  void _openLostModeScreen(LostModeCommand cmd) {
+    if (_isLostModeScreenOpen || !mounted) return;
+    _isLostModeScreenOpen = true;
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute(
+            builder: (_) => LostModeScreen(command: cmd),
+          ),
+        )
+        .then((_) {
+          _isLostModeScreenOpen = false;
+        });
+  }
+
+  void _closeLostModeScreen() {
+    if (_isLostModeScreenOpen && mounted) {
+      _isLostModeScreenOpen = false;
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+    }
+  }
 
   int _currentIndex = 0;
+  int _unreadChatCount = 0;
   List<CircleModel> _circles = [];
   CircleModel? _selectedCircle;
   List<SosAlert> _activeAlerts = [];
   bool _isLoading = true;
   LoudSignalModel? _incomingRingingSignal;
   final List<RealtimeChannel> _chatChannels = [];
+  StreamSubscription? _openChatSub;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _checkAccessibilityStatus();
     _initialize();
   }
 
@@ -66,6 +100,8 @@ class _HomeScreenState extends State<HomeScreen> {
     _chatChannels.clear();
     _gpsStatusSub?.cancel();
     _lostModeSub?.cancel();
+    _alertRefreshTimer?.cancel();
+    _openChatSub?.cancel();
     _audioService.stopListening();
     _sosTriggerSub?.cancel();
     _incomingSignalSub?.cancel();
@@ -76,21 +112,132 @@ class _HomeScreenState extends State<HomeScreen> {
     _loudSignalService.stopListening();
     _geofenceService.stopListening();
     _phoneProtectionService.stopListening();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
-  Future<void> _initialize() async {
-    // Start fast SOS trigger background listener & sync
-    await _sosTriggerService.initialize();
-    _sosTriggerSub = _sosTriggerService.onSosTriggered.listen((_) {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkAccessibilityStatus();
+    }
+  }
+
+  Future<void> _checkAccessibilityStatus() async {
+    try {
+      final enabled = await OemSecurityService.instance.isAccessibilityServiceEnabled();
       if (mounted) {
-        _loadActiveAlerts();
-        setState(() => _currentIndex = 3);
+        setState(() => _isAccessibilityEnabled = enabled);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _promptEnableAccessibility() async {
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: const [
+            Icon(Icons.shield, color: Colors.deepOrange),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Proteksi Kunci Daya & Status Bar',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: const [
+            Text(
+              'Agar pencuri tidak bisa menarik Status Bar ke bawah, membuka Pengaturan HP, mematikan koneksi data, atau mematikan HP secara paksa saat Mode Hilang aktif, silakan aktifkan Layanan Aksesibilitas LingkarAman.',
+              style: TextStyle(fontSize: 13, height: 1.4),
+            ),
+            SizedBox(height: 12),
+            Text(
+              'Petunjuk di Pengaturan:',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 4),
+            Text(
+              '1. Pilih "Proteksi Anti-Matikan Daya (LingkarAman)".\n2. Aktifkan sakelar (switch) lalu pilih "Izinkan / Allow".',
+              style: TextStyle(fontSize: 12, color: Colors.black87, height: 1.4),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Nanti Saja'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.deepOrange,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await OemSecurityService.instance.openAccessibilitySettings();
+            },
+            child: const Text('Buka Pengaturan HP'),
+          ),
+        ],
+      ),
+    );
+    await _checkAccessibilityStatus();
+  }
+
+  Future<void> _initialize() async {
+    // Inisialisasi Nama Panggilan & Notifikasi
+    unawaited(MemberNicknameService.instance.init());
+    Permission.notification.request();
+
+    final soundSettings = SoundSettingsService();
+    soundSettings.initChatNotificationListener();
+    _openChatSub = soundSettings.onOpenChatTriggered.listen((_) {
+      if (mounted) {
+        setState(() => _currentIndex = 1);
+      }
+    });
+    soundSettings.getInitialOpenChatTrigger().then((triggered) {
+      if (triggered && mounted) {
+        setState(() => _currentIndex = 1);
       }
     });
 
-    // Start live location streaming & battery tracking
-    await _locService.startTracking();
+    // 1. Prioritaskan render UI peta & lingkaran secepat mungkin
+    try {
+      await Future.wait([
+        _loadCircles().timeout(const Duration(seconds: 3)),
+        _loadActiveAlerts().timeout(const Duration(seconds: 3)),
+      ]);
+    } catch (_) {}
+
+    if (mounted) {
+      setState(() => _isLoading = false);
+    }
+
+    if (_selectedCircle != null) {
+      _geofenceService.subscribeToCircleEvents(_selectedCircle!.id);
+    }
+
+    // 2. Jalankan background services & triggers secara non-blocking
+    _sosTriggerService.initialize().then((_) {
+      _sosTriggerSub = _sosTriggerService.onSosTriggered.listen((_) {
+        if (mounted) {
+          _loadActiveAlerts();
+          setState(() => _currentIndex = 2);
+        }
+      });
+    });
+
+    // Start live location streaming & battery tracking (Foreground Service & Doze resistant)
+    unawaited(_locService.startTracking());
 
     // Start GPS service status listener and check initial state
     _locService.startGpsListener();
@@ -123,33 +270,73 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     });
 
-    final isGpsOn = await _locService.checkGpsStatus();
-    if (!isGpsOn && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          behavior: SnackBarBehavior.floating,
-          backgroundColor: const Color(0xFFC62828),
-          duration: const Duration(seconds: 8),
-          content: Row(
-            children: const [
-              Icon(Icons.location_off, color: Colors.white),
-              SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'GPS/Lokasi belum dinyalakan. Nyalakan agar fitur pelacakan aktif.',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
+    // Check GPS & Battery Optimization di background
+    _locService.checkGpsStatus().then((isGpsOn) {
+      if (!isGpsOn && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: const Color(0xFFC62828),
+            duration: const Duration(seconds: 8),
+            content: Row(
+              children: const [
+                Icon(Icons.location_off, color: Colors.white),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'GPS/Lokasi belum dinyalakan. Nyalakan agar fitur pelacakan aktif.',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+            action: SnackBarAction(
+              label: 'NYALAKAN',
+              textColor: Colors.yellowAccent,
+              onPressed: () => _locService.openGpsSettings(),
+            ),
+          ),
+        );
+      }
+    });
+
+    // Check Battery Optimization (Anti-Kill OS)
+    final batteryService = BatteryOptimizationService();
+    batteryService.isIgnoringBatteryOptimizations().then((isBatteryIgnored) async {
+      if (!isBatteryIgnored && mounted) {
+        final prefs = await SharedPreferences.getInstance();
+        final hasPrompted = prefs.getBool('battery_optimization_prompted') ?? false;
+        if (!hasPrompted) {
+          await prefs.setBool('battery_optimization_prompted', true);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                behavior: SnackBarBehavior.floating,
+                backgroundColor: const Color(0xFF1E293B),
+                duration: const Duration(seconds: 10),
+                content: Row(
+                  children: const [
+                    Icon(Icons.battery_alert, color: Colors.amberAccent),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Agar pelacakan tidak mati saat HP di saku, izinkan proteksi latar belakang.',
+                        style: TextStyle(color: Colors.white, fontSize: 13),
+                      ),
+                    ),
+                  ],
+                ),
+                action: SnackBarAction(
+                  label: 'IZINKAN',
+                  textColor: Colors.amberAccent,
+                  onPressed: () => batteryService.requestIgnoreBatteryOptimizations(),
                 ),
               ),
-            ],
-          ),
-          action: SnackBarAction(
-            label: 'NYALAKAN',
-            textColor: Colors.yellowAccent,
-            onPressed: () => _locService.openGpsSettings(),
-          ),
-        ),
-      );
-    }
+            );
+          }
+        }
+      }
+    });
 
     // Start background ambient audio request listener
     _audioService.startListeningForRequests();
@@ -200,7 +387,9 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     // Initialize Phone Protection (Lost Mode, Intruder Trap, Last Breath)
-    await _phoneProtectionService.initialize();
+    _phoneProtectionService.initialize().then((_) {
+      _phoneProtectionService.checkAndApplyRemoteLostMode();
+    });
 
     _intruderAlertSub = _phoneProtectionService.onIntruderAlert.listen((alert) {
       if (!mounted) return;
@@ -230,21 +419,22 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     });
 
-    // Check if Lost Mode was persisted from previous session OR active remotely on server
-    await _phoneProtectionService.checkAndApplyRemoteLostMode();
-
-    // Load user's circles & active SOS alerts
-    await _loadCircles();
-    await _loadActiveAlerts();
-
-    if (_selectedCircle != null) {
-      _geofenceService.subscribeToCircleEvents(_selectedCircle!.id);
-    }
-
     // Listen to real-time Lost Mode updates from other circle devices
-    _lostModeSub = _phoneProtectionService.onLostModeChanged.listen((cmd) {
+    _lostModeSub = _phoneProtectionService.onLostModeChanged.listen((cmd) async {
       if (mounted) {
         _loadActiveAlerts();
+        final myUid = _supa.currentUser?.id;
+        if (cmd.targetUserId == myUid) {
+          if (cmd.isActive) {
+            await _phoneProtectionService.applyRemoteLostMode(cmd);
+            if (mounted) {
+              _openLostModeScreen(cmd);
+            }
+          } else {
+            await _phoneProtectionService.deactivateLostMode(targetUserId: myUid!);
+            _closeLostModeScreen();
+          }
+        }
         if (!cmd.isActive) {
           SoundSettingsService().cancelEmergencyNotification();
         }
@@ -272,18 +462,12 @@ class _HomeScreenState extends State<HomeScreen> {
               // HP ini adalah target yang dituju: KUNCI SEKETIKA!
               await _phoneProtectionService.applyRemoteLostMode(cmd);
               if (mounted) {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => LostModeScreen(command: cmd),
-                  ),
-                );
+                _openLostModeScreen(cmd);
               }
             } else if (alert.status == 'resolved' || alert.status == 'cancelled') {
               // Kunci dibuka kembali oleh keluarga!
               await _phoneProtectionService.deactivateLostMode(targetUserId: myUid!);
-              if (mounted && Navigator.of(context).canPop()) {
-                Navigator.of(context).pop();
-              }
+              _closeLostModeScreen();
             }
             return;
           }
@@ -292,11 +476,15 @@ class _HomeScreenState extends State<HomeScreen> {
         // When alert is resolved or cancelled on other devices
         if (alert.status == 'resolved' || alert.status == 'cancelled') {
           await SoundSettingsService().cancelEmergencyNotification();
+          if (mounted) {
+            ScaffoldMessenger.of(context).clearSnackBars();
+          }
           return;
         }
 
         // Only show emergency snackbar for currently active alerts
         if (alert.status == 'active') {
+          ScaffoldMessenger.of(context).clearSnackBars();
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               backgroundColor: Colors.red.shade800,
@@ -316,12 +504,16 @@ class _HomeScreenState extends State<HomeScreen> {
               action: SnackBarAction(
                 label: 'LIHAT',
                 textColor: Colors.white,
-                onPressed: () => setState(() => _currentIndex = 3),
+                onPressed: () => setState(() => _currentIndex = 2),
               ),
             ),
           );
         }
       }
+    });
+
+    _alertRefreshTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (mounted) _loadActiveAlerts();
     });
 
     if (mounted) setState(() => _isLoading = false);
@@ -520,7 +712,9 @@ class _HomeScreenState extends State<HomeScreen> {
     for (var circle in _circles) {
       final ch = _supa.subscribeToMessages(circle.id, (msg) async {
         if (msg.userId != myUid) {
-          final senderName = msg.senderProfile?.fullName ?? 'Anggota';
+          if (mounted) setState(() => _unreadChatCount++);
+          final nickname = MemberNicknameService.instance.getNickname(msg.userId);
+          final senderName = nickname ?? msg.senderProfile?.fullName ?? 'Anggota';
           await SoundSettingsService().showChatNotification(
             senderName: senderName,
             message: msg.message,
@@ -571,6 +765,54 @@ class _HomeScreenState extends State<HomeScreen> {
       final alerts = await _supa.getActiveAlerts(_selectedCircle?.id);
       if (mounted) {
         setState(() => _activeAlerts = alerts);
+        if (alerts.isEmpty) {
+          ScaffoldMessenger.of(context).clearSnackBars();
+        }
+        final hasActiveLostMode = alerts.any((a) => a.message.contains('[MODE HP HILANG]'));
+        if (!hasActiveLostMode) {
+          SoundSettingsService().cancelEmergencyNotification();
+        }
+
+        final myUid = _supa.currentUser?.id;
+        if (myUid != null) {
+          bool isTargetActive = false;
+          for (final alert in alerts) {
+            if (alert.message.contains('[MODE HP HILANG]') && alert.message.contains('Target: $myUid')) {
+              isTargetActive = true;
+              if (!_phoneProtectionService.isLostModeActive) {
+                final cmd = LostModeCommand.parseFromSosMessage(
+                  alertId: alert.id,
+                  message: alert.message,
+                  senderId: alert.userId,
+                  circleId: alert.circleId,
+                );
+                if (cmd != null) {
+                  await _phoneProtectionService.applyRemoteLostMode(cmd);
+                  if (mounted) {
+                    _openLostModeScreen(cmd);
+                  }
+                }
+              }
+              break;
+            }
+          }
+
+          if (!isTargetActive && _phoneProtectionService.isLostModeActive) {
+            final deactivateCmd = LostModeCommand(
+              id: 'unlocked',
+              targetUserId: myUid,
+              senderId: 'remote',
+              isActive: false,
+              contactPhone: '',
+              message: 'Mode HP Hilang dinonaktifkan.',
+              enableSiren: false,
+              enableFakeShutdown: false,
+              updatedAt: DateTime.now(),
+            );
+            await _phoneProtectionService.applyRemoteLostMode(deactivateCmd);
+            _closeLostModeScreen();
+          }
+        }
       }
     } catch (_) {}
   }
@@ -588,6 +830,58 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       body: Column(
         children: [
+          // Accessibility Warning Banner if protection is not complete
+          if (!_isAccessibilityEnabled)
+            Material(
+              color: Colors.amber.shade900,
+              elevation: 3,
+              child: SafeArea(
+                bottom: false,
+                top: !hasActiveSos,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 8.0),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.shield_outlined, color: Colors.white, size: 22),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: const [
+                            Text(
+                              'Proteksi Anti-Maling Belum Lengkap',
+                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                            ),
+                            Text(
+                              'Aktifkan Aksesibilitas agar pencuri tidak bisa tarik status bar / matikan HP.',
+                              style: TextStyle(color: Colors.white, fontSize: 11),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: _promptEnableAccessibility,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: Colors.amber.shade900,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        child: const Text(
+                          'Aktifkan',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
           // Global Prominent SOS Banner if any active alert exists
           if (hasActiveSos)
             Material(
@@ -596,7 +890,7 @@ class _HomeScreenState extends State<HomeScreen> {
               child: SafeArea(
                 bottom: false,
                 child: InkWell(
-                  onTap: () => setState(() => _currentIndex = 3),
+                  onTap: () => setState(() => _currentIndex = 2),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
                     child: Row(
@@ -635,7 +929,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
 
-          // Main Tab Pages
+          // Main Tab Pages (4 Tab Bersih: Peta, Lingkaran, SOS, Profil)
           Expanded(
             child: IndexedStack(
               index: _currentIndex,
@@ -662,12 +956,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   },
                   onRefreshCircles: _loadCircles,
                 ),
-                FeaturesScreen(
-                  circles: _circles,
-                  selectedCircle: _selectedCircle,
-                  onNavigateToTab: (idx) => setState(() => _currentIndex = idx),
-                  onRefresh: _loadCircles,
-                ),
                 SosScreen(
                   selectedCircle: _selectedCircle,
                   activeAlerts: _activeAlerts,
@@ -681,22 +969,30 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
-        onDestinationSelected: (idx) => setState(() => _currentIndex = idx),
+        onDestinationSelected: (idx) {
+          setState(() {
+            _currentIndex = idx;
+            if (idx == 1) _unreadChatCount = 0;
+          });
+        },
         destinations: [
           const NavigationDestination(
             icon: Icon(Icons.map_outlined),
             selectedIcon: Icon(Icons.map, color: Colors.indigo),
             label: 'Peta',
           ),
-          const NavigationDestination(
-            icon: Icon(Icons.group_work_outlined),
-            selectedIcon: Icon(Icons.group_work, color: Colors.indigo),
+          NavigationDestination(
+            icon: Badge(
+              isLabelVisible: _unreadChatCount > 0,
+              label: Text('$_unreadChatCount'),
+              child: const Icon(Icons.group_work_outlined),
+            ),
+            selectedIcon: Badge(
+              isLabelVisible: _unreadChatCount > 0,
+              label: Text('$_unreadChatCount'),
+              child: const Icon(Icons.group_work, color: Colors.indigo),
+            ),
             label: 'Lingkaran',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.grid_view_outlined),
-            selectedIcon: Icon(Icons.grid_view_rounded, color: Colors.indigo),
-            label: 'Fitur',
           ),
           NavigationDestination(
             icon: Badge(

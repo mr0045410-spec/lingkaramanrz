@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:lingkar_aman/services/oem_security_service.dart';
 
 class OnboardingScreen extends StatefulWidget {
   final VoidCallback onFinished;
@@ -17,6 +18,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
   bool _micGranted = false;
   bool _batteryExemptGranted = false;
   bool _overlayGranted = false;
+  bool _accessibilityGranted = false;
   bool _isChecking = true;
 
   @override
@@ -47,6 +49,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
     final mic = await Permission.microphone.isGranted;
     final battery = await Permission.ignoreBatteryOptimizations.isGranted;
     final overlay = await Permission.systemAlertWindow.isGranted;
+    final access = await OemSecurityService.instance.isAccessibilityServiceEnabled();
 
     if (mounted) {
       setState(() {
@@ -56,6 +59,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
         _micGranted = mic;
         _batteryExemptGranted = battery;
         _overlayGranted = overlay;
+        _accessibilityGranted = access;
         _isChecking = false;
       });
     }
@@ -112,6 +116,67 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
     await _checkPermissions();
   }
 
+  Future<void> _requestAccessibilityPermission() async {
+    if (!mounted) return;
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: const [
+            Icon(Icons.shield, color: Colors.deepOrange),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Proteksi Kunci Daya & Status Bar',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: const [
+            Text(
+              'Agar pencuri tidak bisa menarik Status Bar, membuka Pengaturan HP, atau mematikan ponsel secara paksa saat Mode Hilang aktif, sistem memerlukan izin Aksesibilitas.',
+              style: TextStyle(fontSize: 13, height: 1.4),
+            ),
+            SizedBox(height: 12),
+            Text(
+              'Petunjuk di Pengaturan:',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 4),
+            Text(
+              '1. Cari dan pilih "Proteksi Anti-Matikan Daya (LingkarAman)".\n2. Aktifkan sakelar (switch) lalu pilih "Izinkan / Allow".',
+              style: TextStyle(fontSize: 12, color: Colors.black87, height: 1.4),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.deepOrange,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await OemSecurityService.instance.openAccessibilitySettings();
+            },
+            child: const Text('Buka Pengaturan HP'),
+          ),
+        ],
+      ),
+    );
+    await _checkPermissions();
+  }
+
   Future<void> _requestAllPermissions() async {
     await _requestLocationPermission();
     await _requestNotificationPermission();
@@ -119,6 +184,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
     await _requestMicPermission();
     await _requestBatteryPermission();
     await _requestOverlayPermission();
+    if (!_accessibilityGranted) {
+      await _requestAccessibilityPermission();
+    }
   }
 
   Future<void> _finishOnboarding() async {
@@ -134,7 +202,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
         _cameraGranted &&
         _micGranted &&
         _batteryExemptGranted &&
-        _overlayGranted;
+        _overlayGranted &&
+        _accessibilityGranted;
 
     return Scaffold(
       backgroundColor: Colors.grey.shade50,
@@ -272,6 +341,19 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
                           'Wajib agar layar kunci darurat & perlindungan anti-maling langsung tampil di atas layar saat HP hilang atau dicuri.',
                       isGranted: _overlayGranted,
                       onTap: _requestOverlayPermission,
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    // Permission Card 7: Anti-Theft Accessibility Service
+                    _buildPermissionCard(
+                      icon: Icons.shield_outlined,
+                      iconColor: Colors.deepOrange.shade700,
+                      title: 'Proteksi Kunci Daya & Status Bar (Aksesibilitas)',
+                      subtitle:
+                          'Mencegah pencuri menarik status bar ke bawah, mengakses menu Pengaturan HP, atau mematikan HP secara paksa.',
+                      isGranted: _accessibilityGranted,
+                      onTap: _requestAccessibilityPermission,
                     ),
 
                     const SizedBox(height: 24),

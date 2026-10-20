@@ -7,6 +7,7 @@ import '../models/models.dart';
 import '../services/geofence_service.dart';
 import '../services/location_service.dart';
 import '../services/loud_signal_service.dart';
+import '../services/member_nickname_service.dart';
 import '../services/supabase_service.dart';
 import '../widgets/geofence_map_picker.dart';
 import '../widgets/member_detail_sheet.dart';
@@ -42,6 +43,7 @@ class _MapViewScreenState extends State<MapViewScreen> {
 
   List<CircleMember> _members = [];
   List<GeofenceModel> _geofences = [];
+  UserProfile? _myProfile;
   bool _isLoadingMembers = false;
   LatLng _center = const LatLng(-6.2088, 106.8456); // Default: Jakarta
   String _mapLayer = 'standard'; // 'standard', 'satellite', 'dark'
@@ -76,6 +78,8 @@ class _MapViewScreenState extends State<MapViewScreen> {
         });
       }
     });
+    MemberNicknameService.instance.addListener(_onNicknamesChanged);
+    _loadMyProfile();
     _initMap();
     if (widget.selectedCircle != null) {
       _loadMembers(widget.selectedCircle!.id);
@@ -100,8 +104,22 @@ class _MapViewScreenState extends State<MapViewScreen> {
     }
   }
 
+  void _onNicknamesChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _loadMyProfile() async {
+    try {
+      final p = await _supa.getProfile();
+      if (mounted && p != null) {
+        setState(() => _myProfile = p);
+      }
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
+    MemberNicknameService.instance.removeListener(_onNicknamesChanged);
     _positionSub?.cancel();
     _gpsStatusSub?.cancel();
     _stopRealtimeTimer();
@@ -129,6 +147,7 @@ class _MapViewScreenState extends State<MapViewScreen> {
           _members = members;
           _geofences = geofences;
         });
+        _loadMyProfile();
       }
       // Evaluate geofence transitions
       await _geofenceService.evaluateCircleGeofences(
@@ -991,8 +1010,11 @@ class _MapViewScreenState extends State<MapViewScreen> {
     final loc = member.location;
     if (loc == null && !isMe) return const SizedBox.shrink();
 
-    final name = isMe ? 'Saya' : (member.profile?.fullName ?? 'Anggota');
+    final nickname = MemberNicknameService.instance.getNickname(member.userId);
+    final fullName = member.profile?.fullName ?? 'Anggota';
+    final name = isMe ? 'Saya' : (nickname ?? fullName);
     final initials = name.isNotEmpty ? name[0].toUpperCase() : '?';
+    final avatarUrl = isMe ? (_myProfile?.avatarUrl ?? member.profile?.avatarUrl) : member.profile?.avatarUrl;
 
     final batteryLevel = isMe ? _locService.batteryLevel : (loc?.batteryLevel ?? 100);
     final isCharging = isMe ? false : (loc?.isCharging ?? false);
@@ -1068,10 +1090,10 @@ class _MapViewScreenState extends State<MapViewScreen> {
           ),
           const SizedBox(height: 3),
 
-          // Avatar Pin
+          // Avatar Pin (Foto Profil / Inisial)
           Container(
-            width: 40,
-            height: 40,
+            width: 42,
+            height: 42,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: isMe ? Colors.blueAccent : Colors.teal,
@@ -1082,11 +1104,34 @@ class _MapViewScreenState extends State<MapViewScreen> {
                 const BoxShadow(color: Colors.black38, blurRadius: 6),
               ],
             ),
-            child: Center(
-              child: Text(
-                initials,
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-              ),
+            child: ClipOval(
+              child: (avatarUrl != null && avatarUrl.isNotEmpty)
+                  ? Image.network(
+                      avatarUrl,
+                      width: 42,
+                      height: 42,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => Center(
+                        child: Text(
+                          initials,
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                        ),
+                      ),
+                      loadingBuilder: (ctx, child, progress) => progress == null
+                          ? child
+                          : Center(
+                              child: Text(
+                                initials,
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                              ),
+                            ),
+                    )
+                  : Center(
+                      child: Text(
+                        initials,
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                      ),
+                    ),
             ),
           ),
         ],
@@ -1185,10 +1230,10 @@ class _MapViewScreenState extends State<MapViewScreen> {
           ),
           const SizedBox(height: 3),
 
-          // Glowing Blue Avatar Pin
+          // Glowing Blue Avatar Pin (Foto Profil / Inisial)
           Container(
-            width: 40,
-            height: 40,
+            width: 42,
+            height: 42,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: Colors.blueAccent,
@@ -1202,11 +1247,34 @@ class _MapViewScreenState extends State<MapViewScreen> {
                 const BoxShadow(color: Colors.black38, blurRadius: 6),
               ],
             ),
-            child: Center(
-              child: Text(
-                initials,
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-              ),
+            child: ClipOval(
+              child: (_myProfile?.avatarUrl != null && _myProfile!.avatarUrl!.isNotEmpty)
+                  ? Image.network(
+                      _myProfile!.avatarUrl!,
+                      width: 42,
+                      height: 42,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => Center(
+                        child: Text(
+                          initials,
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                        ),
+                      ),
+                      loadingBuilder: (ctx, child, progress) => progress == null
+                          ? child
+                          : Center(
+                              child: Text(
+                                initials,
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                              ),
+                            ),
+                    )
+                  : Center(
+                      child: Text(
+                        initials,
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                      ),
+                    ),
             ),
           ),
         ],
@@ -1955,8 +2023,11 @@ class _MapViewScreenState extends State<MapViewScreen> {
               child: Row(
                 children: _members.map((m) {
                   final isMe = m.userId == _supa.currentUser?.id;
-                  final name = isMe ? 'Saya' : (m.profile?.fullName ?? 'Anggota');
+                  final nickname = MemberNicknameService.instance.getNickname(m.userId);
+                  final fullName = m.profile?.fullName ?? 'Anggota';
+                  final name = isMe ? 'Saya' : (nickname ?? fullName);
                   final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
+                  final avatarUrl = isMe ? (_myProfile?.avatarUrl ?? m.profile?.avatarUrl) : m.profile?.avatarUrl;
                   final zone = m.location != null
                       ? _findGeofenceForLocation(m.location!.latitude, m.location!.longitude)
                       : null;
@@ -1986,10 +2057,15 @@ class _MapViewScreenState extends State<MapViewScreen> {
                             CircleAvatar(
                               radius: 13,
                               backgroundColor: isMe ? Colors.blueAccent : Colors.teal,
-                              child: Text(
-                                initial,
-                                style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold),
-                              ),
+                              backgroundImage: (avatarUrl != null && avatarUrl.isNotEmpty)
+                                  ? NetworkImage(avatarUrl)
+                                  : null,
+                              child: (avatarUrl == null || avatarUrl.isEmpty)
+                                  ? Text(
+                                      initial,
+                                      style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold),
+                                    )
+                                  : null,
                             ),
                             const SizedBox(width: 8),
                             Column(

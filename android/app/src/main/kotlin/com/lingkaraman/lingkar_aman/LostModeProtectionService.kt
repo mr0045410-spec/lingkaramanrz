@@ -15,7 +15,7 @@ import androidx.core.app.NotificationCompat
 class LostModeProtectionService : Service() {
 
     companion object {
-        const val CHANNEL_ID = "lost_mode_protection_channel"
+        const val CHANNEL_ID = "lost_mode_protection_silent_channel"
         const val NOTIFICATION_ID = 3001
         const val PREFS_NAME = "FlutterSharedPreferences"
         const val KEY_LOST_MODE_ACTIVE = "flutter.lost_mode_active"
@@ -122,12 +122,12 @@ class LostModeProtectionService : Service() {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "Mode HP Hilang & Anti-Maling LingkarAman",
-                NotificationManager.IMPORTANCE_HIGH
+                NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Notifikasi darurat terkunci saat ponsel dalam status hilang"
-                setShowBadge(true)
+                description = "Notifikasi status pemantauan saat ponsel dalam status hilang"
+                setShowBadge(false)
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-                enableVibration(true)
+                enableVibration(false)
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)
@@ -169,13 +169,11 @@ class LostModeProtectionService : Service() {
             .setContentText(contentText)
             .setSubText("LingkarAman Anti-Maling")
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOngoing(true)
             .setAutoCancel(false)
             .setContentIntent(pendingIntent)
-            .setFullScreenIntent(pendingIntent, true)
             .build()
     }
 

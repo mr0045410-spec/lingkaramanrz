@@ -9,6 +9,7 @@ import 'screens/home_screen.dart';
 import 'screens/lost_mode_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'services/phone_protection_service.dart';
+import 'services/push_notification_service.dart';
 import 'services/supabase_service.dart';
 
 void main() async {
@@ -19,10 +20,12 @@ void main() async {
     publishableKey: AppConstants.supabaseAnonKey,
   );
 
-  // Initialize Phone Protection (Lost Mode persistence & anti-theft)
-  await PhoneProtectionService().initialize();
-
   runApp(const LingkarAmanApp());
+
+  // Initialize Phone Protection (Lost Mode persistence & anti-theft)
+  unawaited(PhoneProtectionService().initialize());
+  // Initialize Push Notification Service
+  unawaited(PushNotificationService().initialize());
 }
 
 class LingkarAmanApp extends StatefulWidget {
@@ -75,8 +78,21 @@ class _LingkarAmanAppState extends State<LingkarAmanApp> {
   @override
   Widget build(BuildContext context) {
     Widget homeWidget;
-    if (_protectionService.isLostModeActive && _protectionService.activeLostMode != null) {
-      homeWidget = LostModeScreen(command: _protectionService.activeLostMode!);
+    if (_protectionService.isLostModeActive) {
+      homeWidget = LostModeScreen(
+        command: _protectionService.activeLostMode ??
+            LostModeCommand(
+              id: 'persisted_active',
+              targetUserId: _supa.currentUser?.id ?? '',
+              senderId: 'remote',
+              isActive: true,
+              contactPhone: '',
+              message: 'HP ini dalam mode hilang. Segera hubungi pemilik.',
+              enableSiren: true,
+              enableFakeShutdown: false,
+              updatedAt: DateTime.now(),
+            ),
+      );
     } else if (_isCheckingAuth) {
       homeWidget = const Scaffold(body: Center(child: CircularProgressIndicator()));
     } else if (!_onboardingCompleted) {

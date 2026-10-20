@@ -8,6 +8,7 @@ import '../models/models.dart';
 import '../services/app_usage_service.dart';
 import '../services/loud_signal_service.dart';
 import '../services/phone_protection_service.dart';
+import '../services/member_nickname_service.dart';
 import '../services/supabase_service.dart';
 import 'trip_history_sheet.dart';
 
@@ -25,6 +26,7 @@ class MemberDetailSheet extends StatefulWidget {
     return showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      enableDrag: false,
       backgroundColor: Colors.transparent,
       builder: (ctx) => MemberDetailSheet(member: member, circle: circle),
     );
@@ -84,6 +86,80 @@ class _MemberDetailSheetState extends State<MemberDetailSheet> {
     _initProtectionListener();
   }
 
+  Timer? _lostModePollTimer;
+
+  Future<void> _showEditNicknameDialog(String userId, String? currentNickname, String fullName) async {
+    final ctrl = TextEditingController(text: currentNickname ?? '');
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: const [
+            Icon(Icons.badge_outlined, color: Colors.indigo),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text('Nama Panggilan Anggota', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Ganti nama tampilan untuk \$fullName (hanya terlihat oleh Anda).',
+              style: const TextStyle(fontSize: 13, color: Colors.black54),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Nama Panggilan',
+                hintText: 'Misal: Ayah, Ibu, Kakak, Adek',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          if (currentNickname != null && currentNickname.isNotEmpty)
+            TextButton(
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              onPressed: () async {
+                Navigator.pop(ctx);
+                await MemberNicknameService.instance.removeNickname(userId);
+                if (mounted) setState(() {});
+              },
+              child: const Text('Reset Asli'),
+            ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.indigo,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () async {
+              final val = ctrl.text.trim();
+              Navigator.pop(ctx);
+              if (val.isEmpty) {
+                await MemberNicknameService.instance.removeNickname(userId);
+              } else {
+                await MemberNicknameService.instance.setNickname(userId, val);
+              }
+              if (mounted) setState(() {});
+            },
+            child: const Text('Simpan'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _initProtectionListener() async {
     final isActive = await _protectionService.isLostModeActiveForUser(widget.member.userId);
     if (mounted) {
@@ -92,6 +168,14 @@ class _MemberDetailSheetState extends State<MemberDetailSheet> {
     _lostModeSub = _protectionService.onLostModeChanged.listen((cmd) {
       if (mounted && cmd.targetUserId == widget.member.userId) {
         setState(() => _isLostModeActiveForMember = cmd.isActive);
+      }
+    });
+
+    _lostModePollTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
+      if (!mounted) return;
+      final active = await _protectionService.isLostModeActiveForUser(widget.member.userId);
+      if (mounted && _isLostModeActiveForMember != active) {
+        setState(() => _isLostModeActiveForMember = active);
       }
     });
   }
@@ -214,6 +298,7 @@ class _MemberDetailSheetState extends State<MemberDetailSheet> {
 
   @override
   void dispose() {
+    _lostModePollTimer?.cancel();
     _timeoutTimer?.cancel();
     _pollTimer?.cancel();
     _playerStateSub?.cancel();
@@ -350,8 +435,11 @@ class _MemberDetailSheetState extends State<MemberDetailSheet> {
   Widget build(BuildContext context) {
     final m = widget.member;
     final isMe = m.userId == _supa.currentUser?.id;
-    final name = isMe ? 'Saya' : (m.profile?.fullName ?? 'Anggota');
+    final nickname = MemberNicknameService.instance.getNickname(m.userId);
+    final fullName = m.profile?.fullName ?? 'Anggota';
+    final name = isMe ? 'Saya' : (nickname ?? fullName);
     final initials = name.isNotEmpty ? name[0].toUpperCase() : '?';
+    final avatarUrl = m.profile?.avatarUrl;
     final loc = m.location;
 
     Color batteryColor = Colors.green;
@@ -399,27 +487,74 @@ class _MemberDetailSheetState extends State<MemberDetailSheet> {
                       CircleAvatar(
                         radius: 28,
                         backgroundColor: isMe ? Colors.blueAccent : Colors.teal,
-                        child: Text(
-                          initials,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
+                        backgroundImage: (avatarUrl != null && avatarUrl.isNotEmpty)
+                            ? NetworkImage(avatarUrl)
+                            : null,
+                        child: (avatarUrl == null || avatarUrl.isEmpty)
+                            ? Text(
+                                initials,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              )
+                            : null,
                       ),
                       const SizedBox(width: 14),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              name,
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    name,
+                                    style: const TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                                if (!isMe)
+                                  InkWell(
+                                    borderRadius: BorderRadius.circular(20),
+                                    onTap: () => _showEditNicknameDialog(m.userId, nickname, fullName),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: Colors.grey.shade100,
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(color: Colors.grey.shade300),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.edit_note_rounded, size: 16, color: Colors.indigo.shade700),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            nickname != null ? 'Ganti Panggilan' : '+ Panggilan',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w600,
+                                              color: Colors.indigo.shade700,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                              ],
                             ),
+                            if (!isMe && nickname != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 2),
+                                child: Text(
+                                  'Nama asli: \$fullName',
+                                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                ),
+                              ),
                             const SizedBox(height: 4),
                             Row(
                               children: [

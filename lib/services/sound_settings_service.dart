@@ -21,6 +21,26 @@ class SoundSettingsService {
 
   static const MethodChannel _channel = MethodChannel('com.lingkaraman.lingkar_aman/sound_settings');
 
+  final StreamController<void> _openChatController = StreamController<void>.broadcast();
+  Stream<void> get onOpenChatTriggered => _openChatController.stream;
+
+  void initChatNotificationListener() {
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == 'onOpenChatTriggered') {
+        _openChatController.add(null);
+      }
+    });
+  }
+
+  Future<bool> getInitialOpenChatTrigger() async {
+    try {
+      final res = await _channel.invokeMethod<bool>('getInitialOpenChatTrigger');
+      return res == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   static const String keySosAlarm = 'ringtone_sos_alarm';
   static const String keyLoudSignal = 'ringtone_loud_signal';
   static const String keyChat = 'ringtone_chat';

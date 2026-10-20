@@ -152,11 +152,28 @@ class LocationService {
     _periodicTimer?.cancel();
     _periodicTimer = Timer.periodic(interval, (_) => _syncLocation());
 
-    // Setup continuous position stream
-    const locationSettings = LocationSettings(
-      accuracy: LocationAccuracy.high,
-      distanceFilter: 10, // meters
-    );
+    // Setup continuous position stream dengan Foreground Service agar tembus Doze Mode saat layar mati
+    final LocationSettings locationSettings;
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      locationSettings = AndroidSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 10, // meters
+        forceLocationManager: false,
+        intervalDuration: interval,
+        foregroundNotificationConfig: const ForegroundNotificationConfig(
+          notificationTitle: 'LingkarAman Aktif Menjaga Anda',
+          notificationText: 'Pelacakan lokasi & perlindungan anti-maling aktif di latar belakang',
+          notificationIcon: AndroidResource(name: 'ic_launcher', defType: 'mipmap'),
+          enableWakeLock: true,
+          setOngoing: true,
+        ),
+      );
+    } else {
+      locationSettings = const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 10,
+      );
+    }
 
     _positionSubscription?.cancel();
     _positionSubscription = Geolocator.getPositionStream(locationSettings: locationSettings).listen(

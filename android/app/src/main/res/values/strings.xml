@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">LingkarAman</string>
+    <string name="accessibility_service_label">Proteksi Anti-Matikan Daya (LingkarAman)</string>
+    <string name="accessibility_service_description">Proteksi anti-maling LingkarAman untuk mencegah pencuri mematikan ponsel (Power Menu) saat Mode HP Hilang atau Fake Shutdown sedang aktif.</string>
+</resources>
