@@ -755,7 +755,7 @@ class _MemberDetailSheetState extends State<MemberDetailSheet> {
                   // Riwayat Perjalanan (Timeline) Card
                   Container(
                     margin: const EdgeInsets.symmetric(vertical: 4),
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         colors: [Colors.blue.shade50, Colors.indigo.shade50],
@@ -765,38 +765,48 @@ class _MemberDetailSheetState extends State<MemberDetailSheet> {
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(color: Colors.blue.shade200),
                     ),
-                    child: Row(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: Colors.blue.shade600,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Icon(Icons.timeline, color: Colors.white, size: 22),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Riwayat Perjalanan (Linimasa)',
-                                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF1E3A8A)),
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.shade600,
+                                borderRadius: BorderRadius.circular(12),
                               ),
-                              const SizedBox(height: 2),
-                              Text(
-                                'Lihat jejak rute, linimasa waktu, dan titik singgah ${isMe ? "Anda" : "anggota ini"}.',
-                                style: TextStyle(fontSize: 11, color: Colors.blue.shade900),
+                              child: const Icon(Icons.timeline, color: Colors.white, size: 22),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Riwayat Perjalanan (Linimasa)',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFF1E3A8A),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'Lihat jejak rute, linimasa waktu, dan titik singgah ${isMe ? "Anda" : "anggota ini"}.',
+                                    style: TextStyle(fontSize: 11, color: Colors.blue.shade900),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
-                        ElevatedButton(
+                        const SizedBox(height: 10),
+                        ElevatedButton.icon(
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFF1E3A8A),
                             foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            padding: const EdgeInsets.symmetric(vertical: 10),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           ),
                           onPressed: () {
@@ -804,7 +814,8 @@ class _MemberDetailSheetState extends State<MemberDetailSheet> {
                               TripHistorySheet.show(context, widget.member, widget.circle!);
                             }
                           },
-                          child: const Text('Buka Log', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          icon: const Icon(Icons.history, size: 16),
+                          label: const Text('Buka Log Perjalanan', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
                         ),
                       ],
                     ),
