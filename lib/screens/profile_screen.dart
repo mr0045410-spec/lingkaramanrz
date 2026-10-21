@@ -9,6 +9,7 @@ import '../services/location_service.dart';
 import '../services/phone_protection_service.dart';
 import '../services/sos_trigger_service.dart';
 import '../services/supabase_service.dart';
+import '../theme/app_theme.dart';
 import '../widgets/sound_settings_dialog.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -629,359 +630,578 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
     final user = _supa.currentUser;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Profil & Pengaturan'),
-        actions: [
-          if (!_isEditing)
-            IconButton(
-              icon: const Icon(Icons.edit),
-              onPressed: () => setState(() => _isEditing = true),
-              tooltip: 'Edit Profil',
-            )
-          else
-            IconButton(
-              icon: const Icon(Icons.check),
-              onPressed: _saveProfile,
-              tooltip: 'Simpan',
-            ),
-        ],
-      ),
+      backgroundColor: const Color(0xFFF5F7FB),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: CircularProgressIndicator(color: AppColors.primaryNavy))
           : SingleChildScrollView(
-              padding: const EdgeInsets.all(20.0),
               child: Column(
                 children: [
-                  // User Avatar with Camera / Edit Badge
-                  Center(
-                    child: Stack(
+                  // 1. HEADER NAVY MELENGKUNG (Sesuai Referensi Layar 4)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.only(top: 48, bottom: 32, left: 24, right: 24),
+                    decoration: const BoxDecoration(
+                      color: AppColors.primaryNavy,
+                      borderRadius: BorderRadius.only(
+                        bottomLeft: Radius.circular(28),
+                        bottomRight: Radius.circular(28),
+                      ),
+                    ),
+                    child: Column(
                       children: [
-                        GestureDetector(
-                          onTap: _showAvatarPickerSheet,
-                          child: CircleAvatar(
-                            radius: 50,
-                            backgroundColor: Colors.indigo.shade100,
-                            backgroundImage: (_profile?.avatarUrl != null && _profile!.avatarUrl!.isNotEmpty)
-                                ? NetworkImage(_profile!.avatarUrl!)
-                                : null,
-                            child: _isUploadingAvatar
-                                ? const CircularProgressIndicator(color: Colors.white)
-                                : (_profile?.avatarUrl == null || _profile!.avatarUrl!.isEmpty)
-                                    ? Text(
-                                        (_profile?.fullName.isNotEmpty == true)
-                                            ? _profile!.fullName[0].toUpperCase()
-                                            : '?',
-                                        style: TextStyle(fontSize: 38, color: Colors.indigo.shade900, fontWeight: FontWeight.bold),
-                                      )
-                                    : null,
-                          ),
-                        ),
-                        Positioned(
-                          bottom: 0,
-                          right: 0,
-                          child: GestureDetector(
-                            onTap: _showAvatarPickerSheet,
-                            child: Container(
-                              padding: const EdgeInsets.all(7),
-                              decoration: BoxDecoration(
-                                color: Colors.indigo.shade700,
-                                shape: BoxShape.circle,
-                                border: Border.all(color: Colors.white, width: 2),
-                                boxShadow: const [
-                                  BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2)),
-                                ],
-                              ),
-                              child: const Icon(
-                                Icons.camera_alt,
-                                size: 16,
-                                color: Colors.white,
+                        // Avatar Besar dengan Border Putih
+                        Stack(
+                          children: [
+                            GestureDetector(
+                              onTap: _showAvatarPickerSheet,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: Colors.white, width: 3.5),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.15),
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 4),
+                                    ),
+                                  ],
+                                ),
+                                child: CircleAvatar(
+                                  radius: 44,
+                                  backgroundColor: const Color(0xFF2563EB),
+                                  backgroundImage: (_profile?.avatarUrl != null && _profile!.avatarUrl!.isNotEmpty)
+                                      ? NetworkImage(_profile!.avatarUrl!)
+                                      : null,
+                                  child: _isUploadingAvatar
+                                      ? const CircularProgressIndicator(color: Colors.white)
+                                      : (_profile?.avatarUrl == null || _profile!.avatarUrl!.isEmpty)
+                                          ? Text(
+                                              (_profile?.fullName.isNotEmpty == true)
+                                                  ? _profile!.fullName[0].toUpperCase()
+                                                  : '?',
+                                              style: const TextStyle(
+                                                fontSize: 34,
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            )
+                                          : null,
+                                ),
                               ),
                             ),
+                            Positioned(
+                              bottom: 0,
+                              right: 0,
+                              child: GestureDetector(
+                                onTap: _showAvatarPickerSheet,
+                                child: Container(
+                                  padding: const EdgeInsets.all(6),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    shape: BoxShape.circle,
+                                    boxShadow: [
+                                      BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 4),
+                                    ],
+                                  ),
+                                  child: const Icon(
+                                    Icons.camera_alt,
+                                    size: 15,
+                                    color: AppColors.primaryNavy,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          _profile?.fullName ?? 'Budi Santoso',
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          user?.email ?? 'budi@email.com',
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.8),
+                            fontSize: 13,
                           ),
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  Text(
-                    _profile?.fullName ?? 'Pengguna',
-                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                  ),
-                  Text(
-                    user?.email ?? '',
-                    style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
-                  ),
-                  const SizedBox(height: 24),
 
-                  // Profile Form / Details
-                  Card(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Informasi Kontak',
-                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                    child: Column(
+                      children: [
+                        const SizedBox(height: 16),
+
+                        // 2. TOGGLE CARD: BERBAGI LOKASI REALTIME (Layar 4)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: AppColors.border),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.03),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
                           ),
-                          const SizedBox(height: 16),
-                          if (_isEditing) ...[
-                            TextField(
-                              controller: _nameCtrl,
-                              decoration: const InputDecoration(
-                                labelText: 'Nama Lengkap',
-                                prefixIcon: Icon(Icons.person_outline),
-                                border: OutlineInputBorder(),
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: AppColors.primaryTint,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: const Icon(Icons.location_on, color: AppColors.primaryNavy, size: 22),
                               ),
-                            ),
-                            const SizedBox(height: 14),
-                            TextField(
-                              controller: _phoneCtrl,
-                              keyboardType: TextInputType.phone,
-                              decoration: const InputDecoration(
-                                labelText: 'Nomor WhatsApp / HP',
-                                prefixIcon: Icon(Icons.phone_outlined),
-                                border: OutlineInputBorder(),
+                              const SizedBox(width: 12),
+                              const Expanded(
+                                child: Text(
+                                  'Berbagi Lokasi Realtime',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppColors.textPrimary,
+                                  ),
+                                ),
                               ),
-                            ),
-                            const SizedBox(height: 14),
-                            TextField(
-                              controller: _emergencyCtrl,
-                              keyboardType: TextInputType.phone,
-                              decoration: const InputDecoration(
-                                labelText: 'Nomor Kontak Darurat (Keluarga)',
-                                prefixIcon: Icon(Icons.contact_phone_outlined),
-                                helperText: 'Nomor yang dipanggil cepat saat tombol SOS ditekan',
-                                border: OutlineInputBorder(),
+                              Switch(
+                                value: _isLocationSharing,
+                                activeColor: const Color(0xFF16A34A),
+                                activeTrackColor: const Color(0xFFDCFCE7),
+                                onChanged: (val) {
+                                  setState(() => _isLocationSharing = val);
+                                  if (val) {
+                                    _locService.startTracking();
+                                  } else {
+                                    _locService.stopTracking();
+                                  }
+                                },
                               ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+
+                        // 3. GRID MENU FITUR (2 KOLOM, KARTU PUTIH, IKON NAVY)
+                        GridView.count(
+                          crossAxisCount: 2,
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          crossAxisSpacing: 12,
+                          mainAxisSpacing: 12,
+                          childAspectRatio: 1.45,
+                          children: [
+                            // 1. Mode HP Hilang
+                            _buildFeatureCard(
+                              icon: Icons.phonelink_lock_rounded,
+                              label: 'Mode HP Hilang',
+                              onTap: _showLostModeFeatureDialog,
                             ),
-                          ] else ...[
-                            ListTile(
-                              leading: const Icon(Icons.person_outline, color: Colors.indigo),
-                              title: const Text('Nama Lengkap', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                              subtitle: Text(_profile?.fullName ?? '-', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                            // 2. Sinyal Keras
+                            _buildFeatureCard(
+                              icon: Icons.signal_cellular_alt_rounded,
+                              label: 'Sinyal Keras',
+                              onTap: _showLoudSignalFeatureDialog,
                             ),
-                            ListTile(
-                              leading: const Icon(Icons.phone_outlined, color: Colors.indigo),
-                              title: const Text('Nomor WhatsApp / HP', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                              subtitle: Text(_profile?.phoneNumber ?? '-', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                            // 3. Jebakan Penyusup
+                            _buildFeatureCard(
+                              icon: Icons.shield_outlined,
+                              label: 'Jebakan Penyusup',
+                              onTap: () => _toggleIntruderTrap(),
                             ),
-                            ListTile(
-                              leading: const Icon(Icons.contact_phone_outlined, color: Colors.red),
-                              title: const Text('Kontak Darurat Prioritas', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                              subtitle: Text(
-                                _profile?.emergencyContactPhone ?? 'Belum diatur',
-                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.red),
-                              ),
+                            // 4. Riwayat Perjalanan
+                            _buildFeatureCard(
+                              icon: Icons.speed_rounded,
+                              label: 'Riwayat Perjalanan',
+                              onTap: _showTripHistoryFeatureDialog,
+                            ),
+                            // 5. Zona Aman
+                            _buildFeatureCard(
+                              icon: Icons.home_rounded,
+                              label: 'Zona Aman',
+                              onTap: _showGeofenceFeatureDialog,
+                            ),
+                            // 6. Rekam Suara Darurat
+                            _buildFeatureCard(
+                              icon: Icons.mic_rounded,
+                              label: 'Rekam Suara Darurat',
+                              onTap: _showAudioRecordFeatureDialog,
                             ),
                           ],
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
+                        ),
+                        const SizedBox(height: 12),
 
-                  // Location Tracking Toggle Card
-                  Card(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    child: SwitchListTile(
-                      secondary: const Icon(Icons.my_location, color: Colors.indigo),
-                      title: const Text('Berbagi Lokasi Realtime', style: TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: const Text('Kirim koordinat GPS dan level baterai ke lingkaran'),
-                      value: _isLocationSharing,
-                      onChanged: (val) {
-                        setState(() => _isLocationSharing = val);
-                        if (val) {
-                          _locService.startTracking();
-                        } else {
-                          _locService.stopTracking();
-                        }
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Proteksi Latar Belakang & Anti-Kill OS Card
-                  Card(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4.0),
-                      child: Column(
-                        children: [
-                          ListTile(
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                            leading: Icon(
-                              _isBatteryOptimizedIgnored ? Icons.battery_charging_full : Icons.battery_alert,
-                              color: _isBatteryOptimizedIgnored ? Colors.teal : Colors.deepOrange,
-                              size: 28,
-                            ),
-                            title: const Text('Proteksi Latar Belakang (Anti-Kill OS)', style: TextStyle(fontWeight: FontWeight.bold)),
-                            subtitle: Text(
-                              _isBatteryOptimizedIgnored
-                                  ? 'Aplikasi diizinkan berjalan bebas di latar belakang saat HP di saku'
-                                  : 'Ketuk untuk mengabaikan optimasi baterai agar pelacakan tidak dimatikan Android',
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                            trailing: _isBatteryOptimizedIgnored
-                                ? Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                    decoration: BoxDecoration(
-                                      color: Colors.green.shade50,
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(color: Colors.green.shade300),
-                                    ),
-                                    child: const Text('Aktif', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 12)),
-                                  )
-                                : ElevatedButton(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.indigo,
-                                      foregroundColor: Colors.white,
-                                      visualDensity: VisualDensity.compact,
-                                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                                    ),
-                                    onPressed: () async {
-                                      await _batteryService.requestIgnoreBatteryOptimizations();
-                                    },
-                                    child: const Text('Izinkan'),
-                                  ),
+                        // 4. CARD HORIZONTAL: PENGATURAN NADA & RINGTONE
+                        Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: AppColors.border),
                           ),
-                          const Divider(height: 1, indent: 16, endIndent: 16),
-                          ListTile(
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                            leading: const Icon(Icons.settings_suggest, color: Colors.indigo, size: 28),
-                            title: Text('Panduan Autostart (${_deviceInfo.brandDisplayName})', style: const TextStyle(fontWeight: FontWeight.bold)),
-                            subtitle: Text(
-                              'Buka pengaturan agar pelacakan tidak dibunuh oleh sistem ${_deviceInfo.brandDisplayName}',
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                            trailing: OutlinedButton(
-                              style: OutlinedButton.styleFrom(
-                                visualDensity: VisualDensity.compact,
-                                padding: const EdgeInsets.symmetric(horizontal: 10),
+                          child: ListTile(
+                            leading: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: AppColors.primaryTint,
+                                borderRadius: BorderRadius.circular(10),
                               ),
-                              onPressed: _showOemAutostartDialog,
-                              child: const Text('Panduan'),
+                              child: const Icon(Icons.music_note_rounded, color: AppColors.primaryNavy, size: 20),
                             ),
+                            title: const Text(
+                              'Pengaturan Nada & Ringtone',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.textPrimary,
+                              ),
+                            ),
+                            trailing: const Icon(Icons.chevron_right, color: AppColors.textSecondary),
+                            onTap: () => SoundSettingsDialog.show(context),
                           ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
+                        ),
+                        const SizedBox(height: 16),
 
-                  // Security & Anti-Theft Settings Card
-                  Card(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                            child: Text(
-                              'Keamanan & Proteksi Anti-Maling',
-                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                            ),
+                        // 5. INFORMASI KONTAK & AKUN
+                        Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: AppColors.border),
                           ),
-                          ListTile(
-                            leading: const Icon(Icons.lock_outline, color: Colors.deepOrange),
-                            title: const Text('PIN Keamanan Pemilik', style: TextStyle(fontWeight: FontWeight.bold)),
-                            subtitle: Text('Digunakan untuk membuka kunci Mode HP Hilang (PIN: ${_currentPin.replaceAll(RegExp(r'.'), '•')})'),
-                            trailing: TextButton(
-                              onPressed: _changeOwnerPinDialog,
-                              child: const Text('Ubah PIN', style: TextStyle(fontWeight: FontWeight.bold)),
-                            ),
-                          ),
-                          const Divider(height: 1, indent: 16, endIndent: 16),
-                          ListTile(
-                            leading: const Icon(Icons.power_settings_new, color: Colors.red),
-                            title: const Text('Pemicu Tombol Power SOS', style: TextStyle(fontWeight: FontWeight.bold)),
-                            subtitle: Text(_isPowerButtonEnabled
-                                ? 'Aktif: Tekan tombol daya $_powerButtonCount x cepat'
-                                : 'Nonaktif'),
-                            trailing: const Icon(Icons.chevron_right),
-                            onTap: _showPowerButtonSettings,
-                          ),
-                          const Divider(height: 1, indent: 16, endIndent: 16),
-                          SwitchListTile(
-                            secondary: const Icon(Icons.camera_front_outlined, color: Colors.amber),
-                            title: const Text('Jebakan Penyusup (Silent Selfie)', style: TextStyle(fontWeight: FontWeight.bold)),
-                            subtitle: const Text('Ambil foto kamera depan otomatis jika salah PIN 3x'),
-                            value: _isIntruderTrapEnabled,
-                            onChanged: (_) => _toggleIntruderTrap(),
-                          ),
-                          const Divider(height: 1, indent: 16, endIndent: 16),
-                          ListTile(
-                            leading: Icon(
-                              Icons.phonelink_lock,
-                              color: _isAccessibilityEnabled ? Colors.teal : Colors.deepOrange,
-                            ),
-                            title: const Text('Kunci Menu Power (Anti-Shutdown)', style: TextStyle(fontWeight: FontWeight.bold)),
-                            subtitle: Text(
-                              _isAccessibilityEnabled
-                                  ? 'Aktif: Menu daya diblokir saat Mode HP Hilang aktif'
-                                  : 'Nonaktif: Cegah maling mematikan HP via tombol daya',
-                            ),
-                            trailing: _isAccessibilityEnabled
-                                ? Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                    decoration: BoxDecoration(
-                                      color: Colors.green.shade50,
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(color: Colors.green.shade300),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    const Text(
+                                      'Informasi Kontak',
+                                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                                     ),
-                                    child: const Text('Aktif', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 12)),
-                                  )
-                                : ElevatedButton(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.deepOrange,
-                                      foregroundColor: Colors.white,
-                                      visualDensity: VisualDensity.compact,
-                                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                                    TextButton(
+                                      onPressed: () {
+                                        if (_isEditing) {
+                                          _saveProfile();
+                                        } else {
+                                          setState(() => _isEditing = true);
+                                        }
+                                      },
+                                      child: Text(
+                                        _isEditing ? 'Simpan' : 'Edit',
+                                        style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.primaryNavy),
+                                      ),
                                     ),
-                                    onPressed: _showAccessibilityDialog,
-                                    child: const Text('Aktifkan'),
+                                  ],
+                                ),
+                              ),
+                              const Divider(height: 1),
+                              if (_isEditing) ...[
+                                Padding(
+                                  padding: const EdgeInsets.all(16.0),
+                                  child: Column(
+                                    children: [
+                                      TextField(
+                                        controller: _nameCtrl,
+                                        decoration: const InputDecoration(labelText: 'Nama Lengkap'),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      TextField(
+                                        controller: _phoneCtrl,
+                                        keyboardType: TextInputType.phone,
+                                        decoration: const InputDecoration(labelText: 'Nomor WhatsApp / HP'),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      TextField(
+                                        controller: _emergencyCtrl,
+                                        keyboardType: TextInputType.phone,
+                                        decoration: const InputDecoration(
+                                          labelText: 'Kontak Darurat',
+                                          helperText: 'Nomor dipanggil saat tombol SOS ditekan',
+                                        ),
+                                      ),
+                                    ],
                                   ),
+                                ),
+                              ] else ...[
+                                ListTile(
+                                  leading: const Icon(Icons.phone_outlined, color: AppColors.textSecondary, size: 20),
+                                  title: const Text('Nomor HP', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                                  subtitle: Text(_profile?.phoneNumber ?? '-', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                                ),
+                                ListTile(
+                                  leading: const Icon(Icons.contact_phone_outlined, color: AppColors.statusEmergency, size: 20),
+                                  title: const Text('Kontak Darurat Prioritas', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                                  subtitle: Text(
+                                    _profile?.emergencyContactPhone ?? 'Belum diatur',
+                                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.statusEmergency),
+                                  ),
+                                ),
+                              ],
+                            ],
                           ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
+                        ),
+                        const SizedBox(height: 16),
 
-                  // Sound & Ringtone Settings Card
-                  Card(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    child: ListTile(
-                      leading: const Icon(Icons.music_note, color: Colors.indigo),
-                      title: const Text('Pengaturan Nada & Ringtone', style: TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: const Text('Atur nada Alarm SOS, Sinyal Suara, dan Chat'),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => SoundSettingsDialog.show(context),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Sign Out Button
-                  SizedBox(
-                    width: double.infinity,
-                    height: 48,
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.red,
-                        side: const BorderSide(color: Colors.red),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      icon: const Icon(Icons.logout),
-                      label: const Text('Keluar dari Akun', style: TextStyle(fontWeight: FontWeight.bold)),
-                      onPressed: _signOut,
+                        // Tombol Keluar dari Akun
+                        SizedBox(
+                          width: double.infinity,
+                          height: 48,
+                          child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppColors.statusEmergency,
+                              side: const BorderSide(color: Color(0xFFFCA5A5)),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                              backgroundColor: Colors.white,
+                            ),
+                            icon: const Icon(Icons.logout, size: 18),
+                            label: const Text('Keluar dari Akun', style: TextStyle(fontWeight: FontWeight.bold)),
+                            onPressed: _signOut,
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                      ],
                     ),
                   ),
                 ],
               ),
             ),
+    );
+  }
+
+  Widget _buildFeatureCard({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.02),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, color: AppColors.primaryNavy, size: 28),
+                const SizedBox(height: 10),
+                Text(
+                  label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary,
+                    height: 1.2,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showLostModeFeatureDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Row(
+          children: const [
+            Icon(Icons.phonelink_lock_rounded, color: AppColors.primaryNavy),
+            SizedBox(width: 8),
+            Text('Mode HP Hilang', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Mode HP Hilang mengunci layar ponsel jarak jauh dengan PIN keamanan dan menampilkan nomor kontak pemilik.',
+              style: TextStyle(fontSize: 13, height: 1.4),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'PIN Keamanan Anda: ${_currentPin.replaceAll(RegExp(r'.'), '•')}',
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.primaryNavy),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _changeOwnerPinDialog();
+            },
+            child: const Text('Ubah PIN'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primaryNavy,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Tutup'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showLoudSignalFeatureDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Row(
+          children: const [
+            Icon(Icons.signal_cellular_alt_rounded, color: AppColors.primaryNavy),
+            SizedBox(width: 8),
+            Text('Sinyal Keras', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: const Text(
+          'Fitur Sinyal Keras membunyikan alarm volume maksimal di HP anggota keluarga meskipun sedang dalam mode diam/silent. Fitur ini dapat dipicu melalui Detail Anggota pada layar Peta.',
+          style: TextStyle(fontSize: 13, height: 1.4),
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primaryNavy,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Mengerti'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showTripHistoryFeatureDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Row(
+          children: const [
+            Icon(Icons.speed_rounded, color: AppColors.primaryNavy),
+            SizedBox(width: 8),
+            Text('Riwayat Perjalanan', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: const Text(
+          'Riwayat perjalanan merekam pergerakan rute harian secara otomatis dan dapat dilihat melalui profil anggota keluarga di Peta.',
+          style: TextStyle(fontSize: 13, height: 1.4),
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primaryNavy,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Tutup'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showGeofenceFeatureDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Row(
+          children: const [
+            Icon(Icons.home_rounded, color: AppColors.primaryNavy),
+            SizedBox(width: 8),
+            Text('Zona Aman (Geofence)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: const Text(
+          'Zona Aman memberi peringatan otomatis saat anggota keluarga tiba atau keluar dari tempat seperti Rumah atau Sekolah. Anda dapat mengelolanya di tab Lingkaran.',
+          style: TextStyle(fontSize: 13, height: 1.4),
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primaryNavy,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Tutup'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAudioRecordFeatureDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Row(
+          children: const [
+            Icon(Icons.mic_rounded, color: AppColors.primaryNavy),
+            SizedBox(width: 8),
+            Text('Rekam Suara Darurat', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: const Text(
+          'Fitur Rekam Suara Darurat memungkinkan Anda mendengarkan rekaman audio sekitar 15 detik dari perangkat anggota yang membutuhkan bantuan saat mode darurat.',
+          style: TextStyle(fontSize: 13, height: 1.4),
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primaryNavy,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Mengerti'),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -11,6 +11,8 @@ import '../services/member_nickname_service.dart';
 import '../services/supabase_service.dart';
 import '../widgets/geofence_map_picker.dart';
 import '../widgets/member_detail_sheet.dart';
+import '../theme/app_theme.dart';
+import '../widgets/app_components.dart';
 
 class MapViewScreen extends StatefulWidget {
   final List<CircleModel> circles;

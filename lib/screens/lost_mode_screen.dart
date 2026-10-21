@@ -335,25 +335,15 @@ class _LostModeScreenState extends State<LostModeScreen>
     );
   }
 
-  // 1. NORMAL LOST MODE VIEW
+  // 1. NORMAL LOST MODE VIEW (Sesuai Referensi Layar 5)
   Widget _buildNormalLostModeView() {
     final contact = widget.command.contactPhone.trim();
     final message = widget.command.message.trim().isNotEmpty
         ? widget.command.message.trim()
-        : 'HP ini dalam mode hilang. Mohon bantu kembalikan ke pemiliknya.';
+        : 'Tolong hubungi pemilik. Ada imbalan bagi yang mengembalikan.';
 
     return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            const Color(0xFF2A0000),
-            const Color(0xFF0F0000),
-            Colors.black,
-          ],
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-        ),
-      ),
+      color: const Color(0xFF1E212B),
       child: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
@@ -363,214 +353,182 @@ class _LostModeScreenState extends State<LostModeScreen>
                 constraints: BoxConstraints(minHeight: constraints.maxHeight),
                 child: IntrinsicHeight(
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
+                    padding: const EdgeInsets.symmetric(horizontal: 28.0, vertical: 24.0),
                     child: Column(
                       children: [
-              const SizedBox(height: 16),
+                        const Spacer(),
 
-              // Animated Pulsing Warning Icon
-              ScaleTransition(
-                scale: _pulseAnimation,
-                child: Container(
-                  padding: const EdgeInsets.all(22),
-                  decoration: BoxDecoration(
-                    color: Colors.red.withValues(alpha: 0.15),
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.redAccent.withValues(alpha: 0.6), width: 2),
-                  ),
-                  child: const Icon(
-                    Icons.phonelink_lock_rounded,
-                    color: Colors.redAccent,
-                    size: 58,
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 18),
-              const Text(
-                'MODE HP HILANG AKTIF',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.redAccent,
-                  fontSize: 22,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 1.5,
-                ),
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'Ponsel ini dalam pengawasan keluarga LingkarAman.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white70, fontSize: 13),
-              ),
-
-              const SizedBox(height: 24),
-
-              // Message Card
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1E1111),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.red.shade800.withValues(alpha: 0.5)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: const [
-                        Icon(Icons.speaker_notes, color: Colors.amberAccent, size: 18),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Pesan dari Pemilik:',
-                            style: TextStyle(
-                              color: Colors.amberAccent,
-                              fontSize: 13,
-                              fontWeight: FontWeight.bold,
+                        // Lingkaran Merah dengan Ikon Perisai Putih (Denyut)
+                        ScaleTransition(
+                          scale: _pulseAnimation,
+                          child: Container(
+                            width: 100,
+                            height: 100,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFDC2626), // Merah cerah
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFFDC2626).withOpacity(0.4),
+                                  blurRadius: 24,
+                                  spreadRadius: 4,
+                                ),
+                              ],
+                            ),
+                            child: const Center(
+                              child: Icon(
+                                Icons.shield_rounded,
+                                color: Colors.white,
+                                size: 52,
+                              ),
                             ),
                           ),
                         ),
+                        const SizedBox(height: 24),
+
+                        // Judul: "HP INI HILANG"
+                        const Text(
+                          'HP INI HILANG',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+
+                        // Container Pesan Pemilik (Biru Gelap / Slate)
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF282D3A),
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(color: Colors.white.withOpacity(0.08)),
+                          ),
+                          child: Text(
+                            message,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 15,
+                              height: 1.4,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+
+                        // Tombol Hijau: "TELEPON PEMILIK"
+                        SizedBox(
+                          width: double.infinity,
+                          height: 52,
+                          child: ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF16A34A), // Hijau solid
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              elevation: 0,
+                            ),
+                            icon: const Icon(Icons.phone, size: 20, color: Colors.white),
+                            label: Text(
+                              contact.isNotEmpty ? 'TELEPON PEMILIK ($contact)' : 'TELEPON PEMILIK',
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                            onPressed: contact.isNotEmpty ? _callContactNumber : null,
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+
+                        // Tombol Outline Putih: "MASUKKAN PIN"
+                        SizedBox(
+                          width: double.infinity,
+                          height: 52,
+                          child: OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              side: const BorderSide(color: Colors.white70, width: 1.5),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                            onPressed: _showUnlockDialog,
+                            child: const Text(
+                              'MASUKKAN PIN',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+
+                        // 4 Bulatan Indikator PIN (o o o o)
+                        GestureDetector(
+                          onTap: _showUnlockDialog,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: List.generate(4, (index) {
+                              return Container(
+                                margin: const EdgeInsets.symmetric(horizontal: 6),
+                                width: 10,
+                                height: 10,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: Colors.white70, width: 1.5),
+                                  color: Colors.transparent,
+                                ),
+                              );
+                            }),
+                          ),
+                        ),
+
+                        const Spacer(),
+                        const SizedBox(height: 24),
+
+                        // Footer Status GPS
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(
+                              Icons.location_on,
+                              size: 16,
+                              color: Color(0xFF94A3B8),
+                            ),
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                'Lokasi HP ini sedang dibagikan ke keluarga pemilik',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: Color(0xFF94A3B8),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      message,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        height: 1.4,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 16),
-
-              // Direct Phone Call Button
-              if (contact.isNotEmpty)
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green.shade700,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      elevation: 4,
-                    ),
-                    icon: const Icon(Icons.phone, size: 22),
-                    label: Text(
-                      'Hubungi Pemilik: $contact',
-                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                    ),
-                    onPressed: _callContactNumber,
-                  ),
-                ),
-
-              const SizedBox(height: 14),
-
-              // GPS Status Badge
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.05),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.white12),
-                ),
-                child: Row(
-                  children: const [
-                    Icon(Icons.gps_fixed, color: Colors.tealAccent, size: 18),
-                    SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Pelacakan GPS aktif. Koordinat terus dikirimkan secara langsung ke keluarga.',
-                        style: TextStyle(color: Colors.white70, fontSize: 11),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const Spacer(),
-
-              // Siren & Fake Shutdown Toggles
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: _isSirenActive ? Colors.redAccent : Colors.white70,
-                        side: BorderSide(
-                          color: _isSirenActive ? Colors.redAccent : Colors.white24,
-                        ),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                      ),
-                      icon: Icon(_isSirenActive ? Icons.volume_up : Icons.volume_off, size: 18),
-                      label: Text(
-                        _isSirenActive ? 'Sirine Nyala' : 'Sirine Hening',
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                      ),
-                      onPressed: _toggleSiren,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.cyanAccent,
-                        side: const BorderSide(color: Colors.cyanAccent),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                      ),
-                      icon: const Icon(Icons.power_settings_new, size: 18),
-                      label: const Text(
-                        'Kamuflase Mati',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                      ),
-                      onPressed: () {
-                        setState(() => _isFakeShutdown = true);
-                        _protectionService.toggleFakeShutdown(true);
-                      },
-                    ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 12),
-
-              // Owner Unlock Button
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: Colors.black87,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  icon: const Icon(Icons.lock_open, size: 20),
-                  label: const Text(
-                    'Buka Kunci Pemilik (PIN)',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                  ),
-                  onPressed: _showUnlockDialog,
-                ),
-              ),
-                      const SizedBox(height: 10),
-                    ],
                   ),
                 ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
-    ),
-  );
-}
+    );
+  }
 }

@@ -968,7 +968,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ],
       ),
       bottomNavigationBar: NavigationBar(
+        backgroundColor: Colors.white,
+        elevation: 10,
+        shadowColor: Colors.black12,
         selectedIndex: _currentIndex,
+        indicatorColor: const Color(0xFFEFF6FF),
         onDestinationSelected: (idx) {
           setState(() {
             _currentIndex = idx;
@@ -977,35 +981,35 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         },
         destinations: [
           const NavigationDestination(
-            icon: Icon(Icons.map_outlined),
-            selectedIcon: Icon(Icons.map, color: Colors.indigo),
+            icon: Icon(Icons.location_on_outlined, color: Color(0xFF64748B)),
+            selectedIcon: Icon(Icons.location_on, color: Color(0xFF1E3A8A)),
             label: 'Peta',
           ),
           NavigationDestination(
             icon: Badge(
               isLabelVisible: _unreadChatCount > 0,
-              label: Text('$_unreadChatCount'),
-              child: const Icon(Icons.group_work_outlined),
+              label: Text(''),
+              child: const Icon(Icons.groups_outlined, color: Color(0xFF64748B)),
             ),
             selectedIcon: Badge(
               isLabelVisible: _unreadChatCount > 0,
-              label: Text('$_unreadChatCount'),
-              child: const Icon(Icons.group_work, color: Colors.indigo),
+              label: Text(''),
+              child: const Icon(Icons.groups_rounded, color: Color(0xFF1E3A8A)),
             ),
             label: 'Lingkaran',
           ),
           NavigationDestination(
             icon: Badge(
               isLabelVisible: hasActiveSos,
-              label: Text('${_activeAlerts.length}'),
-              child: const Icon(Icons.crisis_alert_outlined),
+              label: Text(''),
+              child: const Icon(Icons.crisis_alert_outlined, color: Color(0xFF64748B)),
             ),
-            selectedIcon: const Icon(Icons.crisis_alert, color: Colors.red),
+            selectedIcon: const Icon(Icons.crisis_alert, color: Color(0xFFDC2626)),
             label: 'SOS',
           ),
           const NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person, color: Colors.indigo),
+            icon: Icon(Icons.person_outline, color: Color(0xFF64748B)),
+            selectedIcon: Icon(Icons.person, color: Color(0xFF1E3A8A)),
             label: 'Profil',
           ),
         ],

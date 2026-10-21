@@ -11,6 +11,7 @@ import 'screens/onboarding_screen.dart';
 import 'services/phone_protection_service.dart';
 import 'services/push_notification_service.dart';
 import 'services/supabase_service.dart';
+import 'theme/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -106,18 +107,7 @@ class _LingkarAmanAppState extends State<LingkarAmanApp> {
     return MaterialApp(
       title: AppConstants.appName,
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF1E3A8A), // Deep Indigo / Navy
-          primary: const Color(0xFF1E3A8A),
-          error: Colors.redAccent,
-        ),
-        appBarTheme: const AppBarTheme(
-          centerTitle: true,
-          elevation: 0,
-        ),
-      ),
+      theme: AppTheme.lightTheme,
       home: homeWidget,
     );
   }

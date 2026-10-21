@@ -10,6 +10,8 @@ import '../services/loud_signal_service.dart';
 import '../services/phone_protection_service.dart';
 import '../services/member_nickname_service.dart';
 import '../services/supabase_service.dart';
+import '../theme/app_theme.dart';
+import '../widgets/app_components.dart';
 import 'trip_history_sheet.dart';
 
 class MemberDetailSheet extends StatefulWidget {
@@ -481,12 +483,12 @@ class _MemberDetailSheetState extends State<MemberDetailSheet> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Profile Header
+                                    // IDENTITAS ANGGOTA (Sesuai Referensi Layar 8)
                   Row(
                     children: [
                       CircleAvatar(
-                        radius: 28,
-                        backgroundColor: isMe ? Colors.blueAccent : Colors.teal,
+                        radius: 26,
+                        backgroundColor: isMe ? AppColors.primaryNavy : const Color(0xFF3B82F6),
                         backgroundImage: (avatarUrl != null && avatarUrl.isNotEmpty)
                             ? NetworkImage(avatarUrl)
                             : null,
@@ -495,7 +497,7 @@ class _MemberDetailSheetState extends State<MemberDetailSheet> {
                                 initials,
                                 style: const TextStyle(
                                   color: Colors.white,
-                                  fontSize: 24,
+                                  fontSize: 20,
                                   fontWeight: FontWeight.bold,
                                 ),
                               )
@@ -506,89 +508,34 @@ class _MemberDetailSheetState extends State<MemberDetailSheet> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    name,
-                                    style: const TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                                if (!isMe)
-                                  InkWell(
-                                    borderRadius: BorderRadius.circular(20),
-                                    onTap: () => _showEditNicknameDialog(m.userId, nickname, fullName),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        color: Colors.grey.shade100,
-                                        borderRadius: BorderRadius.circular(12),
-                                        border: Border.all(color: Colors.grey.shade300),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(Icons.edit_note_rounded, size: 16, color: Colors.indigo.shade700),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            nickname != null ? 'Ganti Panggilan' : '+ Panggilan',
-                                            style: TextStyle(
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.w600,
-                                              color: Colors.indigo.shade700,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                            if (!isMe && nickname != null)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 2),
-                                child: Text(
-                                  'Nama asli: \$fullName',
-                                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                                ),
+                            Text(
+                              name,
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.textPrimary,
                               ),
-                            const SizedBox(height: 4),
+                            ),
+                            const SizedBox(height: 3),
                             Row(
                               children: [
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: m.isAdmin ? Colors.amber.shade100 : Colors.indigo.shade50,
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Text(
-                                    m.isAdmin ? '👑 Admin Utama (Pemilik)' : '👤 Anggota Lingkaran',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: m.isAdmin ? Colors.orange.shade900 : Colors.indigo.shade700,
-                                      fontWeight: FontWeight.bold,
-                                    ),
+                                  width: 7,
+                                  height: 7,
+                                  decoration: const BoxDecoration(
+                                    color: AppColors.statusSuccess,
+                                    shape: BoxShape.circle,
                                   ),
                                 ),
-                                if (loc != null) ...[
-                                  const SizedBox(width: 8),
-                                  Icon(
-                                    loc.isCharging ? Icons.battery_charging_full : Icons.battery_std,
-                                    size: 16,
-                                    color: batteryColor,
+                                const SizedBox(width: 6),
+                                Text(
+                                  isMe ? 'Di sini • Baterai ${loc?.batteryLevel ?? 100}%' : 'Di rumah • Baterai ${loc?.batteryLevel ?? 100}%',
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    color: AppColors.textSecondary,
+                                    fontWeight: FontWeight.w500,
                                   ),
-                                  Text(
-                                    '${loc.batteryLevel}%',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: batteryColor,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
+                                ),
                               ],
                             ),
                           ],
@@ -597,10 +544,182 @@ class _MemberDetailSheetState extends State<MemberDetailSheet> {
                     ],
                   ),
 
-                  const SizedBox(height: 16),
-                  const Divider(),
+                  const SizedBox(height: 18),
 
-                  // Location Details
+                  // 3 TOMBOL TINDAKAN CEPAT WARNA (Sesuai Referensi Layar 8)
+                  Row(
+                    children: [
+                      // Tombol 1: Merah "Sinyal Keras"
+                      Expanded(
+                        child: ActionTileButton(
+                          icon: Icons.signal_cellular_alt_rounded,
+                          label: 'Sinyal Keras',
+                          backgroundColor: const Color(0xFFDC2626), // Merah
+                          foregroundColor: Colors.white,
+                          onTap: _activeSentSignal != null ? _stopLoudSignal : _sendLoudSignal,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+
+                      // Tombol 2: Navy "Mode HP Hilang"
+                      Expanded(
+                        child: ActionTileButton(
+                          icon: Icons.shield_rounded,
+                          label: 'Mode HP Hilang',
+                          backgroundColor: AppColors.primaryNavy, // Navy
+                          foregroundColor: Colors.white,
+                          onTap: _isLostModeActiveForMember ? _deactivateLostMode : _showActivateLostModeDialog,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+
+                      // Tombol 3: Abu-abu "Riwayat Perjalanan"
+                      Expanded(
+                        child: ActionTileButton(
+                          icon: Icons.history_rounded,
+                          label: 'Riwayat Perjalanan',
+                          backgroundColor: const Color(0xFF64748B), // Slate / Abu-abu
+                          foregroundColor: Colors.white,
+                          onTap: () {
+                            if (widget.circle != null) {
+                              TripHistorySheet.show(context, widget.member, widget.circle!);
+                            }
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 18),
+
+                  // KOTAK PRATINJAU PETA PERJALANAN (Sesuai Referensi Layar 8)
+                  Container(
+                    width: double.infinity,
+                    height: 120,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: Stack(
+                        children: [
+                          // Simulasi Polyline Rute Visual / Peta Rute Mini
+                          Center(
+                            child: Icon(
+                              Icons.route_rounded,
+                              size: 48,
+                              color: AppColors.primaryNavy.withOpacity(0.3),
+                            ),
+                          ),
+                          // Badge "Rute hari ini"
+                          Positioned(
+                            top: 10,
+                            left: 10,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: AppColors.border),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.04),
+                                    blurRadius: 4,
+                                  ),
+                                ],
+                              ),
+                              child: const Text(
+                                'Rute hari ini',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  // INFORMASI STATUS LOKASI: Terakhir terlihat & Zona Aman (Layar 8 Referensi)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Column(
+                      children: [
+                        // Terakhir terlihat
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.access_time_rounded, color: AppColors.textSecondary, size: 18),
+                              const SizedBox(width: 10),
+                              const Text(
+                                'Terakhir terlihat',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: AppColors.textSecondary,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              const Spacer(),
+                              Text(
+                                loc != null
+                                    ? '${DateTime.now().difference(loc.updatedAt).inMinutes.clamp(1, 1440)} menit lalu'
+                                    : 'Baru saja',
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Divider(height: 1),
+                        // Zona Aman
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Row(
+                            children: const [
+                              Icon(Icons.location_on_rounded, color: AppColors.primaryNavy, size: 18),
+                              SizedBox(width: 10),
+                              Text(
+                                'Zona Aman',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: AppColors.textSecondary,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              Spacer(),
+                              Text(
+                                'Rumah',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 18),
+// Location Details
                   if (loc != null) ...[
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,

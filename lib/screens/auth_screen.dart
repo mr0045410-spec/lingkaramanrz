@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/supabase_service.dart';
+import '../theme/app_theme.dart';
 import '../utils/disposable_email_checker.dart';
 
 class AuthScreen extends StatefulWidget {
@@ -26,6 +27,14 @@ class _AuthScreenState extends State<AuthScreen> {
 
   int _resendCountdown = 60;
   Timer? _countdownTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _otpController.addListener(() {
+      if (mounted) setState(() {});
+    });
+  }
 
   @override
   void dispose() {
@@ -92,19 +101,15 @@ class _AuthScreenState extends State<AuthScreen> {
         _startResendTimer();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            backgroundColor: Colors.teal.shade800,
+            backgroundColor: AppColors.primaryNavy,
             behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             content: Row(
-              children: [
-                const Icon(Icons.mark_email_read, color: Colors.white),
-                const SizedBox(width: 10),
+              children: const [
+                Icon(Icons.mark_email_read_rounded, color: Colors.white),
+                SizedBox(width: 10),
                 Expanded(
-                  child: Text(
-                    isResend
-                        ? 'Kode OTP baru telah dikirim ke $email'
-                        : 'Kode verifikasi 6 digit telah dikirim ke $email',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
+                  child: Text('Kode OTP telah dikirimkan ke email Anda.'),
                 ),
               ],
             ),
@@ -122,9 +127,14 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   Future<void> _verifyOtp() async {
-    final otp = _otpController.text.trim();
-    if (otp.length != 6) {
-      setState(() => _errorMessage = 'Masukkan 6 digit kode OTP secara lengkap');
+    final token = _otpController.text.trim();
+    if (token.isEmpty) {
+      setState(() => _errorMessage = 'Masukkan 6 digit kode OTP');
+      return;
+    }
+
+    if (token.length < 6) {
+      setState(() => _errorMessage = 'Kode OTP harus terdiri dari 6 digit');
       return;
     }
 
@@ -136,7 +146,7 @@ class _AuthScreenState extends State<AuthScreen> {
     try {
       await SupabaseService().verifyEmailOtp(
         email: _emailController.text.trim(),
-        token: otp,
+        token: token,
       );
 
       if (mounted) {
@@ -186,30 +196,27 @@ class _AuthScreenState extends State<AuthScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFF0F2027), Color(0xFF203A43), Color(0xFF2C5364)],
-          ),
-        ),
-        child: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
-              child: Card(
-                elevation: 8,
-                color: Colors.white.withValues(alpha: 0.95),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                child: Padding(
-                  padding: const EdgeInsets.all(24.0),
-                  child: _isOtpSent ? _buildOtpStep(theme) : _buildEmailStep(theme),
-                ),
-              ),
+      backgroundColor: AppColors.bgPrimary,
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 28.0, vertical: 24.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // Header Logo Perisai & Pin Lokasi
+                _buildHeaderLogo(),
+                const SizedBox(height: 28),
+
+                if (_errorMessage != null) ...[
+                  _buildErrorCard(_errorMessage!),
+                  const SizedBox(height: 16),
+                ],
+
+                // Form Email atau Form 6 Digit OTP
+                if (_isOtpSent) _buildOtpStep() else _buildEmailStep(),
+              ],
             ),
           ),
         ),
@@ -217,45 +224,72 @@ class _AuthScreenState extends State<AuthScreen> {
     );
   }
 
-  /// TAHAP 1: INPUT NAMA & EMAIL (DENGAN PROTEKSI ANTI-TEMP MAIL)
-  Widget _buildEmailStep(ThemeData theme) {
+  Widget _buildHeaderLogo() {
+    return Column(
+      children: [
+        // Perisai Biru dengan Pin Lokasi di Tengah (Sesuai Referensi Layar 7)
+        Container(
+          width: 80,
+          height: 80,
+          decoration: BoxDecoration(
+            color: AppColors.primaryNavy,
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(20),
+              topRight: Radius.circular(20),
+              bottomLeft: Radius.circular(40),
+              bottomRight: Radius.circular(40),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.primaryNavy.withOpacity(0.25),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: const Center(
+            child: Icon(
+              Icons.location_on,
+              color: Colors.white,
+              size: 42,
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        const Text(
+          'LingkarAman',
+          style: TextStyle(
+            fontSize: 26,
+            fontWeight: FontWeight.bold,
+            color: AppColors.primaryNavy,
+            letterSpacing: -0.5,
+          ),
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'Keluarga aman, hati tenang',
+          style: TextStyle(
+            fontSize: 14,
+            color: AppColors.textSecondary,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEmailStep() {
     return Form(
       key: _formKey,
       child: Column(
-        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Logo / Icon
+          // Tab Switcher Masuk / Daftar Baru
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(4),
             decoration: BoxDecoration(
-              color: Colors.redAccent.withValues(alpha: 0.12),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(
-              Icons.shield_outlined,
-              size: 56,
-              color: Colors.redAccent,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'LingkarAman',
-            style: theme.textTheme.headlineMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-              color: const Color(0xFF1E293B),
-            ),
-          ),
-          Text(
-            'Pelindung Keluarga & Komunitas',
-            style: theme.textTheme.bodyMedium?.copyWith(color: Colors.grey[600]),
-          ),
-          const SizedBox(height: 20),
-
-          // Tab Selector: Masuk / Daftar
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.grey.shade100,
-              borderRadius: BorderRadius.circular(10),
+              color: AppColors.bgSecondary,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.border),
             ),
             child: Row(
               children: [
@@ -273,14 +307,14 @@ class _AuthScreenState extends State<AuthScreen> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(vertical: 10),
                       decoration: BoxDecoration(
-                        color: !_isSignUp ? Colors.redAccent : Colors.transparent,
+                        color: !_isSignUp ? AppColors.primaryNavy : Colors.transparent,
                         borderRadius: BorderRadius.circular(10),
                       ),
                       alignment: Alignment.center,
                       child: Text(
                         'Masuk',
                         style: TextStyle(
-                          color: !_isSignUp ? Colors.white : Colors.grey.shade700,
+                          color: !_isSignUp ? Colors.white : AppColors.textSecondary,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -301,14 +335,14 @@ class _AuthScreenState extends State<AuthScreen> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(vertical: 10),
                       decoration: BoxDecoration(
-                        color: _isSignUp ? Colors.redAccent : Colors.transparent,
+                        color: _isSignUp ? AppColors.primaryNavy : Colors.transparent,
                         borderRadius: BorderRadius.circular(10),
                       ),
                       alignment: Alignment.center,
                       child: Text(
                         'Daftar Baru',
                         style: TextStyle(
-                          color: _isSignUp ? Colors.white : Colors.grey.shade700,
+                          color: _isSignUp ? Colors.white : AppColors.textSecondary,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -320,165 +354,148 @@ class _AuthScreenState extends State<AuthScreen> {
           ),
           const SizedBox(height: 18),
 
-          if (_errorMessage != null) _buildErrorCard(_errorMessage!),
-
-          // Badge Info Keamanan Email Asli
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            margin: const EdgeInsets.only(bottom: 14),
-            decoration: BoxDecoration(
-              color: Colors.blue.shade50,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.blue.shade200),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.verified_user_outlined, size: 18, color: Colors.blue.shade800),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Verifikasi aman via OTP email. Temp mail otomatis ditolak.',
-                    style: TextStyle(fontSize: 12, color: Colors.blue.shade900),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
           if (_isSignUp) ...[
             TextFormField(
               controller: _nameController,
-              decoration: const InputDecoration(
-                labelText: 'Nama Lengkap',
-                hintText: 'Contoh: Budi Santoso',
-                prefixIcon: Icon(Icons.person_outline),
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                hintText: 'Nama Lengkap',
+                prefixIcon: const Icon(Icons.person_outline_rounded, color: AppColors.textSecondary),
+                filled: true,
+                fillColor: AppColors.bgSecondary,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: const BorderSide(color: AppColors.border),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: const BorderSide(color: AppColors.border),
+                ),
               ),
-              validator: (v) =>
-                  (v == null || v.trim().isEmpty) ? 'Nama lengkap wajib diisi' : null,
+              validator: (val) {
+                if (_isSignUp && (val == null || val.trim().isEmpty)) {
+                  return 'Nama lengkap wajib diisi';
+                }
+                return null;
+              },
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 12),
             TextFormField(
               controller: _phoneController,
               keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(
-                labelText: 'Nomor WhatsApp / HP (Opsional)',
-                hintText: 'Contoh: 081234567890',
-                prefixIcon: Icon(Icons.phone_outlined),
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                hintText: 'Nomor WhatsApp / HP (Opsional)',
+                prefixIcon: const Icon(Icons.phone_outlined, color: AppColors.textSecondary),
+                filled: true,
+                fillColor: AppColors.bgSecondary,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: const BorderSide(color: AppColors.border),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: const BorderSide(color: AppColors.border),
+                ),
               ),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 12),
           ],
 
+          // Input Alamat Email
           TextFormField(
             controller: _emailController,
             keyboardType: TextInputType.emailAddress,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'Alamat Email Pribadi',
-              hintText: 'nama@gmail.com',
-              prefixIcon: Icon(Icons.email_outlined),
-              border: OutlineInputBorder(),
+              hintText: 'nama@email.com',
+              prefixIcon: const Icon(Icons.mail_outline_rounded, color: AppColors.textSecondary),
+              filled: true,
+              fillColor: AppColors.bgSecondary,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: const BorderSide(color: AppColors.border),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: const BorderSide(color: AppColors.border),
+              ),
             ),
             validator: DisposableEmailChecker.validateEmail,
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 18),
 
           // Tombol Kirim Kode OTP
           SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: ElevatedButton.icon(
+            height: 52,
+            child: ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.redAccent,
+                backgroundColor: AppColors.primaryNavy,
                 foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                elevation: 0,
               ),
-              icon: _isLoading
-                  ? const SizedBox.shrink()
-                  : const Icon(Icons.send_rounded, size: 20),
-              label: _isLoading
+              onPressed: _isLoading ? null : () => _sendOtp(isResend: false),
+              child: _isLoading
                   ? const SizedBox(
-                      height: 24,
-                      width: 24,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.5,
-                        color: Colors.white,
-                      ),
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
                     )
                   : Text(
                       _isSignUp ? 'Kirim Kode OTP Pendaftaran' : 'Kirim Kode OTP Masuk',
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
-                      ),
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                     ),
-              onPressed: _isLoading ? null : () => _sendOtp(isResend: false),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 24),
 
+          // Divider atau OR
           Row(
-            children: [
-              Expanded(child: Divider(color: Colors.grey.shade300)),
+            children: const [
+              Expanded(child: Divider(color: AppColors.border)),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
+                padding: EdgeInsets.symmetric(horizontal: 14),
                 child: Text(
-                  'ATAU',
-                  style: TextStyle(
-                    color: Colors.grey.shade500,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  'atau',
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 13),
                 ),
               ),
-              Expanded(child: Divider(color: Colors.grey.shade300)),
+              Expanded(child: Divider(color: AppColors.border)),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 24),
 
-          // Tombol Masuk dengan Google
+          // Tombol Lanjutkan dengan Google
           SizedBox(
-            width: double.infinity,
-            height: 50,
+            height: 52,
             child: OutlinedButton(
               style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.black87,
-                side: BorderSide(color: Colors.grey.shade300),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                foregroundColor: AppColors.textPrimary,
+                side: const BorderSide(color: AppColors.border, width: 1.2),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                backgroundColor: Colors.white,
               ),
               onPressed: (_isLoading || _isGoogleLoading) ? null : _signInWithGoogle,
               child: _isGoogleLoading
                   ? const SizedBox(
-                      height: 22,
                       width: 22,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.5,
-                        color: Colors.redAccent,
-                      ),
+                      height: 22,
+                      child: CircularProgressIndicator(color: AppColors.primaryNavy, strokeWidth: 2),
                     )
                   : Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Container(
-                          width: 24,
-                          height: 24,
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.grey.shade300),
-                          ),
-                          child: const Text(
-                            'G',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w900,
-                              color: Color(0xFF4285F4),
-                            ),
+                        // Google G Icon
+                        Image.network(
+                          'https://www.gstatic.com/images/branding/product/1x/gsa_512dp.png',
+                          width: 22,
+                          height: 22,
+                          errorBuilder: (_, __, ___) => const Icon(
+                            Icons.g_mobiledata,
+                            size: 28,
+                            color: Color(0xFF4285F4),
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -487,6 +504,7 @@ class _AuthScreenState extends State<AuthScreen> {
                           style: TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w600,
+                            color: AppColors.textPrimary,
                           ),
                         ),
                       ],
@@ -498,161 +516,140 @@ class _AuthScreenState extends State<AuthScreen> {
     );
   }
 
-  /// TAHAP 2: INPUT KODE VERIFIKASI OTP 6 DIGIT
-  Widget _buildOtpStep(ThemeData theme) {
-    final email = _emailController.text.trim();
+  Widget _buildOtpStep() {
+    final currentOtp = _otpController.text;
 
     return Column(
-      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Icon Email Terkirim
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.teal.shade50,
-            shape: BoxShape.circle,
-          ),
-          child: Icon(
-            Icons.mark_email_read_outlined,
-            size: 52,
-            color: Colors.teal.shade700,
+        // 6 Kotak Digit OTP Terpisah (Sesuai Referensi Layar 7)
+        GestureDetector(
+          onTap: () {
+            // Focuskan input tersembunyi
+          },
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: List.generate(6, (index) {
+              final isFilled = index < currentOtp.length;
+              final isCurrent = index == currentOtp.length;
+              final digit = isFilled ? currentOtp[index] : '';
+
+              return Container(
+                width: 46,
+                height: 54,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: isFilled ? AppColors.primaryTint : AppColors.bgSecondary,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: isCurrent
+                        ? AppColors.primaryNavy
+                        : isFilled
+                            ? AppColors.primaryLight
+                            : AppColors.border,
+                    width: isCurrent || isFilled ? 1.8 : 1.2,
+                  ),
+                ),
+                child: Text(
+                  digit,
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.primaryNavy,
+                  ),
+                ),
+              );
+            }),
           ),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 12),
+
+        // Input tersembunyi yang mengontrol 6 kotak di atas
+        Opacity(
+          opacity: 0.0,
+          child: SizedBox(
+            height: 1,
+            child: TextField(
+              controller: _otpController,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              maxLength: 6,
+              onChanged: (val) {
+                if (val.length == 6) {
+                  _verifyOtp();
+                }
+              },
+            ),
+          ),
+        ),
 
         const Text(
-          'Masukkan Kode Verifikasi',
+          'Kode 6 digit dikirim ke email Anda',
+          textAlign: TextAlign.center,
           style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-            color: Color(0xFF1E293B),
-          ),
-        ),
-        const SizedBox(height: 8),
-
-        Text(
-          'Kode 6 digit telah dikirim ke:',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          email,
-          textAlign: TextAlign.center,
-          style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-            color: Colors.indigo,
+            fontSize: 13,
+            color: AppColors.textSecondary,
           ),
         ),
         const SizedBox(height: 20),
 
-        if (_errorMessage != null) _buildErrorCard(_errorMessage!),
-
-        // Input 6 Digit OTP
-        TextFormField(
-          controller: _otpController,
-          autofocus: true,
-          keyboardType: TextInputType.number,
-          textAlign: TextAlign.center,
-          maxLength: 6,
-          style: const TextStyle(
-            fontSize: 28,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 14,
-            color: Colors.black87,
-          ),
-          decoration: InputDecoration(
-            counterText: '',
-            hintText: '••••••',
-            hintStyle: TextStyle(
-              letterSpacing: 14,
-              color: Colors.grey.shade400,
-            ),
-            filled: true,
-            fillColor: Colors.grey.shade50,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: BorderSide(color: Colors.grey.shade300),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: Colors.redAccent, width: 2),
-            ),
-          ),
-          onChanged: (val) {
-            if (val.trim().length == 6) {
-              _verifyOtp();
-            }
-          },
-        ),
-        const SizedBox(height: 20),
-
-        // Tombol Verifikasi
+        // Tombol Verifikasi & Masuk
         SizedBox(
-          width: double.infinity,
-          height: 50,
+          height: 52,
           child: ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.redAccent,
+              backgroundColor: AppColors.primaryNavy,
               foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              elevation: 0,
             ),
             onPressed: _isLoading ? null : _verifyOtp,
             child: _isLoading
                 ? const SizedBox(
-                    height: 24,
-                    width: 24,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.5,
-                      color: Colors.white,
-                    ),
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
                   )
                 : const Text(
                     'Verifikasi & Masuk',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
           ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 14),
 
-        // Kirim Ulang & Ganti Email
+        // Countdown / Kirim Ulang
         Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            TextButton.icon(
-              style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
-              icon: const Icon(Icons.arrow_back, size: 16),
-              label: const Text('Ganti Email', style: TextStyle(fontSize: 13)),
-              onPressed: _isLoading
-                  ? null
-                  : () {
-                      _countdownTimer?.cancel();
-                      setState(() {
-                        _isOtpSent = false;
-                        _errorMessage = null;
-                        _otpController.clear();
-                      });
-                    },
-            ),
             TextButton(
-              style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
-              onPressed: (_resendCountdown == 0 && !_isLoading)
-                  ? () => _sendOtp(isResend: true)
-                  : null,
+              onPressed: _resendCountdown > 0 ? null : () => _sendOtp(isResend: true),
               child: Text(
                 _resendCountdown > 0
-                    ? 'Kirim ulang (${_resendCountdown}s)'
-                    : 'Kirim Ulang Kode',
+                    ? 'Kirim ulang dalam ${_resendCountdown}s'
+                    : 'Kirim Ulang Kode OTP',
                 style: TextStyle(
+                  color: _resendCountdown > 0 ? AppColors.textMuted : AppColors.primaryNavy,
+                  fontWeight: FontWeight.w600,
                   fontSize: 13,
-                  fontWeight: FontWeight.bold,
-                  color: _resendCountdown == 0 ? Colors.indigo : Colors.grey,
+                ),
+              ),
+            ),
+            const Text('•', style: TextStyle(color: AppColors.textMuted)),
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _isOtpSent = false;
+                  _otpController.clear();
+                  _errorMessage = null;
+                });
+              },
+              child: const Text(
+                'Ganti Email',
+                style: TextStyle(
+                  color: AppColors.textSecondary,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
                 ),
               ),
             ),
@@ -662,23 +659,26 @@ class _AuthScreenState extends State<AuthScreen> {
     );
   }
 
-  Widget _buildErrorCard(String errorText) {
+  Widget _buildErrorCard(String error) {
     return Container(
-      padding: const EdgeInsets.all(12),
-      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.red.shade50,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.red.shade200),
+        color: const Color(0xFFFEF2F2),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFFCA5A5)),
       ),
       child: Row(
         children: [
-          const Icon(Icons.error_outline, color: Colors.red),
-          const SizedBox(width: 8),
+          const Icon(Icons.error_outline_rounded, color: AppColors.statusEmergency, size: 20),
+          const SizedBox(width: 10),
           Expanded(
             child: Text(
-              errorText,
-              style: const TextStyle(color: Colors.red, fontSize: 13),
+              error,
+              style: const TextStyle(
+                color: Color(0xFF991B1B),
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ),
         ],

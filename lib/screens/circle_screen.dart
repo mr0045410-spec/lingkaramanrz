@@ -6,6 +6,8 @@ import '../services/geofence_service.dart';
 import '../services/supabase_service.dart';
 import '../widgets/geofence_map_picker.dart';
 import '../widgets/member_detail_sheet.dart';
+import '../theme/app_theme.dart';
+import '../widgets/app_components.dart';
 import '../services/member_nickname_service.dart';
 import '../services/sound_settings_service.dart';
 
@@ -394,45 +396,84 @@ class _CircleScreenState extends State<CircleScreen> with SingleTickerProviderSt
             )
           : Column(
               children: [
-                // Invite Code Banner
-                Container(
-                  color: Colors.indigo.shade50,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.vpn_key_outlined, size: 20, color: Colors.indigo),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Wrap(
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            const Text(
-                              'Kode Invite: ',
-                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-                            ),
+                // KARTU BIRU TUA (NAVY) KODE UNDANGAN KELUARGA (Sesuai Referensi Layar 2)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 22),
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryNavy,
+                      borderRadius: BorderRadius.circular(22),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.primaryNavy.withOpacity(0.25),
+                          blurRadius: 14,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: const [
+                            Icon(Icons.groups_rounded, color: Colors.white70, size: 20),
+                            SizedBox(width: 8),
                             Text(
-                              circle.inviteCode,
-                              style: const TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.indigo,
-                                letterSpacing: 1.5,
+                              'Kode Undangan Keluarga',
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
                               ),
                             ),
                           ],
                         ),
-                      ),
-                      TextButton.icon(
-                        icon: const Icon(Icons.copy, size: 16),
-                        label: const Text('Salin'),
-                        onPressed: () {
-                          Clipboard.setData(ClipboardData(text: circle.inviteCode));
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Kode invite berhasil disalin!')),
-                          );
-                        },
-                      ),
-                    ],
+                        const SizedBox(height: 12),
+                        // Kode Besar Putih
+                        Text(
+                          circle.inviteCode,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 30,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 3,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        // Tombol Putih Kapsul: "Salin Kode"
+                        ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: AppColors.primaryNavy,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
+                            elevation: 0,
+                          ),
+                          icon: const Icon(Icons.copy_rounded, size: 16),
+                          label: const Text(
+                            'Salin Kode',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          ),
+                          onPressed: () {
+                            Clipboard.setData(ClipboardData(text: circle.inviteCode));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                backgroundColor: AppColors.primaryNavy,
+                                behavior: SnackBarBehavior.floating,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                content: const Text('Kode undangan berhasil disalin!'),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
                   ),
                 ),
 
@@ -459,106 +500,117 @@ class _CircleScreenState extends State<CircleScreen> with SingleTickerProviderSt
                                 final avatarUrl = m.profile?.avatarUrl;
                                 final loc = m.location;
 
-                                return ListTile(
-                                  onTap: () => MemberDetailSheet.show(context, m, circle),
-                                  leading: CircleAvatar(
-                                    backgroundColor: isMe ? Colors.blue : Colors.teal,
-                                    backgroundImage: (avatarUrl != null && avatarUrl.isNotEmpty)
-                                        ? NetworkImage(avatarUrl)
-                                        : null,
-                                    child: (avatarUrl == null || avatarUrl.isEmpty)
-                                        ? Text(
-                                            name.isNotEmpty ? name[0].toUpperCase() : '?',
-                                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                                          )
-                                        : null,
+                                final battery = loc?.batteryLevel ?? 100;
+                                final isCharging = loc?.isCharging ?? false;
+
+                                String timeAgo = 'Baru saja';
+                                if (loc != null) {
+                                  final diff = DateTime.now().difference(loc.updatedAt);
+                                  if (diff.inMinutes < 1) {
+                                    timeAgo = 'Baru saja';
+                                  } else if (diff.inMinutes < 60) {
+                                    timeAgo = '${diff.inMinutes} menit lalu';
+                                  } else if (diff.inHours < 24) {
+                                    timeAgo = '${diff.inHours} jam lalu';
+                                  } else {
+                                    timeAgo = '${diff.inDays} hari lalu';
+                                  }
+                                }
+
+                                final locationStatus = isMe ? 'Di sini' : (loc != null ? 'Di rumah • $timeAgo' : 'Lokasi belum aktif');
+
+                                return Container(
+                                  margin: const EdgeInsets.only(bottom: 12),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(18),
+                                    border: Border.all(color: AppColors.border),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.02),
+                                        blurRadius: 8,
+                                        offset: const Offset(0, 2),
+                                      ),
+                                    ],
                                   ),
-                                  title: Row(
-                                    children: [
-                                      Flexible(
-                                        child: Text(
-                                          name,
-                                          style: const TextStyle(fontWeight: FontWeight.bold),
-                                          overflow: TextOverflow.ellipsis,
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      borderRadius: BorderRadius.circular(18),
+                                      onTap: () => MemberDetailSheet.show(context, m, circle),
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                        child: Row(
+                                          children: [
+                                            // Avatar Bulat
+                                            CircleAvatar(
+                                              radius: 24,
+                                              backgroundColor: isMe ? AppColors.primaryNavy : const Color(0xFF3B82F6),
+                                              backgroundImage: (avatarUrl != null && avatarUrl.isNotEmpty)
+                                                  ? NetworkImage(avatarUrl)
+                                                  : null,
+                                              child: (avatarUrl == null || avatarUrl.isEmpty)
+                                                  ? Text(
+                                                      name.isNotEmpty ? name[0].toUpperCase() : '?',
+                                                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+                                                    )
+                                                  : null,
+                                            ),
+                                            const SizedBox(width: 14),
+
+                                            // Kolom Nama, Status, dan Baterai
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  Row(
+                                                    children: [
+                                                      Flexible(
+                                                        child: Text(
+                                                          name,
+                                                          maxLines: 1,
+                                                          overflow: TextOverflow.ellipsis,
+                                                          style: const TextStyle(
+                                                            fontSize: 15,
+                                                            fontWeight: FontWeight.bold,
+                                                            color: AppColors.textPrimary,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                      const SizedBox(width: 8),
+                                                      RoleBadge(role: m.role),
+                                                    ],
+                                                  ),
+                                                  const SizedBox(height: 4),
+                                                  Row(
+                                                    children: [
+                                                      Text(
+                                                        locationStatus,
+                                                        style: const TextStyle(
+                                                          fontSize: 12,
+                                                          color: AppColors.textSecondary,
+                                                        ),
+                                                      ),
+                                                      const SizedBox(width: 8),
+                                                      BatteryPill(
+                                                        batteryLevel: battery,
+                                                        isCharging: isCharging,
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+
+                                            const Icon(
+                                              Icons.chevron_right,
+                                              color: AppColors.textMuted,
+                                              size: 22,
+                                            ),
+                                          ],
                                         ),
                                       ),
-                                      if (m.isAdmin) ...[
-                                        const SizedBox(width: 6),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                                          decoration: BoxDecoration(
-                                            color: Colors.amber.shade100,
-                                            borderRadius: BorderRadius.circular(6),
-                                          ),
-                                          child: const Text(
-                                            '👑 Admin Utama',
-                                            style: TextStyle(fontSize: 10, color: Colors.orange, fontWeight: FontWeight.bold),
-                                          ),
-                                        ),
-                                      ] else ...[
-                                        const SizedBox(width: 6),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                                          decoration: BoxDecoration(
-                                            color: Colors.blue.shade50,
-                                            borderRadius: BorderRadius.circular(6),
-                                          ),
-                                          child: Text(
-                                            '👤 Anggota',
-                                            style: TextStyle(fontSize: 10, color: Colors.blue.shade800, fontWeight: FontWeight.w600),
-                                          ),
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                  subtitle: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      if (!isMe && nickname != null)
-                                        Padding(
-                                          padding: const EdgeInsets.only(bottom: 2),
-                                          child: Text(
-                                            'Nama asli: $fullName',
-                                            style: TextStyle(fontSize: 11, color: Colors.indigo.shade700, fontWeight: FontWeight.w500),
-                                          ),
-                                        ),
-                                      loc != null
-                                          ? Text(
-                                              'Baterai: ${loc.batteryLevel}% ${loc.isCharging ? "(Mengisi)" : ""} • Update: ${DateFormat('HH:mm').format(loc.updatedAt)}',
-                                              style: const TextStyle(fontSize: 12),
-                                            )
-                                          : const Text(
-                                              'Lokasi belum terdeteksi',
-                                              style: TextStyle(fontSize: 12, color: Colors.grey),
-                                            ),
-                                    ],
-                                  ),
-                                  trailing: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      if (loc != null)
-                                        Icon(
-                                          loc.batteryLevel < 20
-                                              ? Icons.battery_alert
-                                              : (loc.isCharging
-                                                  ? Icons.battery_charging_full
-                                                  : Icons.battery_full),
-                                          color: loc.batteryLevel < 20 ? Colors.red : Colors.green,
-                                          size: 20,
-                                        ),
-                                      if (!isMe) ...[
-                                        IconButton(
-                                          icon: const Icon(Icons.edit_note_rounded, color: Colors.indigo, size: 22),
-                                          tooltip: 'Ubah Nama Panggilan',
-                                          onPressed: () => _showEditNicknameDialog(m.userId, nickname, fullName),
-                                        ),
-                                        IconButton(
-                                          icon: const Icon(Icons.mic, color: Colors.deepOrange, size: 22),
-                                          tooltip: 'Dengar Suara Sekitar (15s)',
-                                          onPressed: () => MemberDetailSheet.show(context, m, circle),
-                                        ),
-                                      ],
-                                    ],
+                                    ),
                                   ),
                                 );
                               },

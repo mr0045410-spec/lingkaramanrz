@@ -6,6 +6,7 @@ import '../models/models.dart';
 import '../services/location_service.dart';
 import '../services/sos_trigger_service.dart';
 import '../services/supabase_service.dart';
+import '../theme/app_theme.dart';
 
 class SosScreen extends StatefulWidget {
   final CircleModel? selectedCircle;
@@ -268,464 +269,343 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
 
   @override
   Widget build(BuildContext context) {
-    final myUid = _supa.currentUser?.id;
-    final myActiveAlert = widget.activeAlerts.where((a) => a.userId == myUid).firstOrNull;
-
     return Scaffold(
+      backgroundColor: const Color(0xFFF5F7FB),
       appBar: AppBar(
-        title: const Text('Pusat Darurat SOS'),
-        backgroundColor: Colors.red.shade700,
-        foregroundColor: Colors.white,
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          children: [
-            // Active SOS Status if triggered by user
-            if (myActiveAlert != null) ...[
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.red.shade100,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.red, width: 2),
-                ),
-                child: Column(
-                  children: [
-                    const Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.crisis_alert, color: Colors.red, size: 28),
-                        SizedBox(width: 8),
-                        Flexible(
-                          child: Text(
-                            'STATUS: SOS SEDANG AKTIF',
-                            style: TextStyle(
-                              color: Colors.red,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Dikirim pada ${DateFormat('HH:mm:ss, d MMM').format(myActiveAlert.triggeredAt)}',
-                      style: const TextStyle(fontSize: 12, color: Colors.black87),
-                    ),
-                    const SizedBox(height: 12),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green.shade700,
-                        foregroundColor: Colors.white,
-                      ),
-                      icon: const Icon(Icons.check_circle_outline),
-                      label: const Text('Saya Sudah Aman (Selesaikan SOS)'),
-                      onPressed: () => _resolveSOS(myActiveAlert.id),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 24),
-            ],
-
-            // Giant Panic Button (Hold 5 Seconds to Activate)
-            Center(
-              child: Column(
-                children: [
-                  Text(
-                    _isHolding
-                        ? 'Tetap tahan tombol sampai lingkaran merah penuh!'
-                        : 'Tekan & tahan tombol selama 5 detik untuk mengaktifkan SOS darurat',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: _isHolding ? Colors.red.shade700 : Colors.grey,
-                      fontSize: 13,
-                      fontWeight: _isHolding ? FontWeight.bold : FontWeight.normal,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  AnimatedBuilder(
-                    animation: _holdController,
-                    builder: (context, _) {
-                      final secondsLeft = (5.0 * (1.0 - _holdController.value)).ceil().clamp(1, 5);
-
-                      return SizedBox(
-                        width: 210,
-                        height: 210,
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            // Progress Outer Ring
-                            SizedBox(
-                              width: 210,
-                              height: 210,
-                              child: CircularProgressIndicator(
-                                value: _isHolding ? _holdController.value : 0.0,
-                                strokeWidth: 8,
-                                backgroundColor: Colors.red.shade100,
-                                valueColor: AlwaysStoppedAnimation<Color>(Colors.red.shade800),
-                              ),
-                            ),
-                            // Button Body
-                            GestureDetector(
-                              onTapDown: (_) => _startHold(),
-                              onTapUp: (_) => _cancelHold(),
-                              onTapCancel: () => _cancelHold(),
-                              child: Container(
-                                width: 180,
-                                height: 180,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: _isHolding ? Colors.red.shade800 : Colors.red.shade600,
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.red.withValues(alpha: _isHolding ? 0.7 : 0.4),
-                                      blurRadius: _isHolding ? 35 : 25,
-                                      spreadRadius: _isHolding ? 12 : 8,
-                                    ),
-                                  ],
-                                ),
-                                child: Center(
-                                  child: _isSending
-                                      ? const CircularProgressIndicator(color: Colors.white)
-                                      : _isHolding
-                                          ? Column(
-                                              mainAxisAlignment: MainAxisAlignment.center,
-                                              children: [
-                                                Text(
-                                                  '$secondsLeft',
-                                                  style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 52,
-                                                    fontWeight: FontWeight.w900,
-                                                  ),
-                                                ),
-                                                const Text(
-                                                  'TAHAN TERUS...',
-                                                  style: TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 10,
-                                                    fontWeight: FontWeight.bold,
-                                                    letterSpacing: 1.5,
-                                                  ),
-                                                ),
-                                              ],
-                                            )
-                                          : const Column(
-                                              mainAxisAlignment: MainAxisAlignment.center,
-                                              children: [
-                                                Icon(Icons.touch_app, color: Colors.white, size: 44),
-                                                SizedBox(height: 4),
-                                                Text(
-                                                  'SOS',
-                                                  style: TextStyle(
-                                                    color: Colors.white,
-                                                    fontWeight: FontWeight.w900,
-                                                    fontSize: 32,
-                                                    letterSpacing: 2,
-                                                  ),
-                                                ),
-                                                Text(
-                                                  'TAHAN 5 DETIK',
-                                                  style: TextStyle(
-                                                    color: Colors.white70,
-                                                    fontSize: 10,
-                                                    fontWeight: FontWeight.bold,
-                                                    letterSpacing: 1.2,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 28),
-                ],
-              ),
-            ),
-
-            const Divider(),
-            const SizedBox(height: 12),
-
-            // Fast SOS Triggers Section (Without Opening App)
-            Card(
-              elevation: 2,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.bolt, color: Colors.orange.shade800, size: 24),
-                        const SizedBox(width: 8),
-                        const Expanded(
-                          child: Text(
-                            'Pemicu Cepat (Tanpa Buka Aplikasi)',
-                            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Pilih cara cepat yang ingin Anda aktifkan untuk memicu SOS darurat saat aplikasi tertutup atau layar mati:',
-                      style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
-                    ),
-                    const Divider(height: 24),
-
-                    // Trigger 1: Power Button
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.red.shade50,
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(Icons.power_settings_new, color: Colors.red.shade700, size: 22),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  const Expanded(
-                                    child: Text(
-                                      'Tombol Power Fisik',
-                                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                                    ),
-                                  ),
-                                  Switch(
-                                    value: _powerButtonEnabled,
-                                    activeThumbColor: Colors.red.shade700,
-                                    onChanged: _togglePowerButton,
-                                  ),
-                                ],
-                              ),
-                              Text(
-                                'Tekan tombol power di samping HP secara cepat berturut-turut di dalam saku untuk mengirim SOS rahasia.',
-                                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                              ),
-                              if (_powerButtonEnabled) ...[
-                                const SizedBox(height: 8),
-                                Wrap(
-                                  spacing: 8,
-                                  runSpacing: 4,
-                                  crossAxisAlignment: WrapCrossAlignment.center,
-                                  children: [
-                                    Text(
-                                      'Sensitivitas: ',
-                                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.grey.shade800),
-                                    ),
-                                    ChoiceChip(
-                                      label: const Text('3x Tekan', style: TextStyle(fontSize: 11)),
-                                      selected: _powerButtonCount == 3,
-                                      selectedColor: Colors.red.shade100,
-                                      onSelected: (sel) {
-                                        if (sel) _setPowerButtonCount(3);
-                                      },
-                                    ),
-                                    ChoiceChip(
-                                      label: const Text('4x Tekan', style: TextStyle(fontSize: 11)),
-                                      selected: _powerButtonCount == 4,
-                                      selectedColor: Colors.red.shade100,
-                                      onSelected: (sel) {
-                                        if (sel) _setPowerButtonCount(4);
-                                      },
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    const Divider(height: 24),
-
-                    // Trigger 2: Quick Settings Tile
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.blue.shade50,
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(Icons.dashboard_customize, color: Colors.blue.shade700, size: 22),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Panel Atas Android (Quick Tile)',
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                              ),
-                              Text(
-                                'Tombol SOS langsung di bar status atas sebelah Wi-Fi/Senter. Tarik layar atas dan tap 1 kali.',
-                                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                              ),
-                              const SizedBox(height: 6),
-                              OutlinedButton.icon(
-                                style: OutlinedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                                icon: const Icon(Icons.help_outline, size: 16),
-                                label: const Text('Panduan Pasang', style: TextStyle(fontSize: 12)),
-                                onPressed: _showQuickTileGuide,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    const Divider(height: 24),
-
-                    // Trigger 3: Home Screen Shortcut
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.green.shade50,
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(Icons.add_to_home_screen, color: Colors.green.shade700, size: 22),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Pintasan Layar Utama (Home Screen)',
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                              ),
-                              Text(
-                                'Tempatkan ikon tombol merah SOS langsung di halaman beranda ponsel Anda.',
-                                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                              ),
-                              const SizedBox(height: 8),
-                              ElevatedButton.icon(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.red.shade700,
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                                icon: const Icon(Icons.add, size: 16),
-                                label: const Text('Pasang ke Layar Utama', style: TextStyle(fontSize: 12)),
-                                onPressed: _pinShortcut,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-            const Divider(),
-            const SizedBox(height: 12),
-
-            // Quick Hotlines Section
-            const Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                'Panggilan Cepat Darurat',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            if (_userProfile?.emergencyContactPhone != null &&
-                _userProfile!.emergencyContactPhone!.isNotEmpty)
-              Card(
-                color: Colors.indigo.shade50,
-                child: ListTile(
-                  leading: const CircleAvatar(
-                    backgroundColor: Colors.indigo,
-                    child: Icon(Icons.favorite, color: Colors.white),
-                  ),
-                  title: const Text(
-                    'Kontak Darurat Pribadi',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  subtitle: Text(_userProfile!.emergencyContactPhone!),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.call, color: Colors.indigo),
-                    onPressed: () => _callNumber(_userProfile!.emergencyContactPhone!),
-                  ),
-                ),
-              ),
-
-            Row(
-              children: [
-                Expanded(
-                  child: _buildHotlineButton('Polisi', '110', Icons.local_police, Colors.blue),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _buildHotlineButton('Ambulans', '118', Icons.medical_services, Colors.red),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildHotlineButton('Damkar', '113', Icons.fire_truck, Colors.orange),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _buildHotlineButton('Basarnas / SAR', '115', Icons.health_and_safety, Colors.teal),
-                ),
-              ],
-            ),
-          ],
+        title: const Text(
+          'SOS Darurat',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+            color: AppColors.textPrimary,
+          ),
         ),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        centerTitle: false,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, color: AppColors.textPrimary),
+            onPressed: widget.onRefreshAlerts,
+            tooltip: 'Segarkan Status',
+          ),
+        ],
       ),
-    );
-  }
-
-  Widget _buildHotlineButton(String name, String number, IconData icon, Color color) {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () => _callNumber(number),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 14.0, horizontal: 10.0),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 12.0),
           child: Column(
             children: [
-              Icon(icon, color: color, size: 28),
-              const SizedBox(height: 6),
-              Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-              Text(number, style: TextStyle(color: Colors.grey.shade600, fontSize: 11)),
+              const SizedBox(height: 20),
+
+              // TOMBOL SOS DARURAT BESAR BERTINGKAT (Sesuai Referensi Layar 3)
+              AnimatedBuilder(
+                animation: _holdController,
+                builder: (context, child) {
+                  final progress = _holdController.value;
+                  return GestureDetector(
+                    onTapDown: (_) {
+                      if (!_isSending) {
+                        setState(() => _isHolding = true);
+                        _holdController.forward();
+                        HapticFeedback.heavyImpact();
+                      }
+                    },
+                    onTapUp: (_) {
+                      if (!_isSending) {
+                        setState(() => _isHolding = false);
+                        _holdController.reverse();
+                      }
+                    },
+                    onTapCancel: () {
+                      if (!_isSending) {
+                        setState(() => _isHolding = false);
+                        _holdController.reverse();
+                      }
+                    },
+                    child: Center(
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          // Layer 1: Lingkaran Luar (Radar / Glow)
+                          Container(
+                            width: 250,
+                            height: 250,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: const Color(0xFFFEE2E2).withOpacity(0.7), // Merah muda lembut
+                            ),
+                          ),
+
+                          // Layer 2: Lingkaran Tengah
+                          Container(
+                            width: 210,
+                            height: 210,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: const Color(0xFFFECACA), // Merah aksen tengah
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFFDC2626).withOpacity(0.2),
+                                  blurRadius: 18,
+                                  spreadRadius: 2,
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          // Layer 3: Lingkaran Inti Merah Solid
+                          Container(
+                            width: 176,
+                            height: 176,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: const Color(0xFFDC2626), // Merah cerah darurat
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFFB91C1C).withOpacity(0.4),
+                                  blurRadius: 14,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
+                            ),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                if (_isSending) ...[
+                                  const SizedBox(
+                                    width: 38,
+                                    height: 38,
+                                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  const Text(
+                                    'MENGIRIM...',
+                                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                                  ),
+                                ] else ...[
+                                  const Icon(
+                                    Icons.notifications_active_rounded,
+                                    color: Colors.white,
+                                    size: 46,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  const Text(
+                                    'TAHAN\n5 DETIK',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w900,
+                                      fontSize: 16,
+                                      letterSpacing: 0.5,
+                                      height: 1.15,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+
+                          // Indikator Progress Melingkar saat Tombol Ditahan
+                          if (_isHolding && !_isSending)
+                            SizedBox(
+                              width: 184,
+                              height: 184,
+                              child: CircularProgressIndicator(
+                                value: progress,
+                                strokeWidth: 5,
+                                valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                                backgroundColor: Colors.transparent,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+
+              const SizedBox(height: 28),
+
+              // Keterangan di Bawah Tombol SOS
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16.0),
+                child: Text(
+                  'SOS terkirim ke semua anggota\nlingkaran beserta lokasi Anda',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: AppColors.textSecondary,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 36),
+
+              // 2 KARTU TOMBOL BAWAH (Layar 3 Referensi)
+              Row(
+                children: [
+                  // Kartu 1: Tombol Power 3x
+                  Expanded(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: AppColors.border),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.02),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(18),
+                          onTap: () => _togglePowerButton(!_powerButtonEnabled),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 12),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.power_settings_new_rounded,
+                                  color: _powerButtonEnabled ? AppColors.textPrimary : AppColors.textMuted,
+                                  size: 32,
+                                ),
+                                const SizedBox(height: 10),
+                                Text(
+                                  'Tombol Power\n${_powerButtonCount}x',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                    color: AppColors.textPrimary,
+                                    height: 1.2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+
+                  // Kartu 2: Panggilan Darurat 112
+                  Expanded(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: AppColors.border),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.02),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(18),
+                          onTap: () async {
+                            final uri = Uri.parse('tel:112');
+                            if (await canLaunchUrl(uri)) {
+                              await launchUrl(uri);
+                            }
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 12),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: const [
+                                Icon(
+                                  Icons.phone_rounded,
+                                  color: AppColors.textPrimary,
+                                  size: 32,
+                                ),
+                                SizedBox(height: 10),
+                                Text(
+                                  'Panggilan Darurat\n112',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                    color: AppColors.textPrimary,
+                                    height: 1.2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+
+              // DAFTAR ALERT AKTIF JIKA ADA (Tetap dipertahankan agar tidak ada regresi fitur)
+              if (widget.activeAlerts.isNotEmpty) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEF2F2),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFFCA5A5)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.warning_amber_rounded, color: AppColors.statusEmergency, size: 20),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Alert Darurat Aktif (${widget.activeAlerts.length})',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                              color: AppColors.statusEmergency,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      for (var alert in widget.activeAlerts)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 6.0),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.circle, size: 6, color: AppColors.statusEmergency),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  '${alert.message} (${DateFormat('HH:mm').format(alert.triggeredAt)})',
+                                  style: const TextStyle(fontSize: 12, color: Color(0xFF7F1D1D)),
+                                ),
+                              ),
+                              TextButton(
+                                onPressed: () => _resolveSOS(alert.id),
+                                child: const Text('Selesaikan', style: TextStyle(fontSize: 11, color: AppColors.statusEmergency)),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
             ],
           ),
         ),
