@@ -9,10 +9,7 @@ import '../services/location_service.dart';
 import '../services/loud_signal_service.dart';
 import '../services/member_nickname_service.dart';
 import '../services/supabase_service.dart';
-import '../widgets/geofence_map_picker.dart';
 import '../widgets/member_detail_sheet.dart';
-import '../theme/app_theme.dart';
-import '../widgets/app_components.dart';
 
 class MapViewScreen extends StatefulWidget {
   final List<CircleModel> circles;
@@ -46,6 +43,7 @@ class _MapViewScreenState extends State<MapViewScreen> {
   List<CircleMember> _members = [];
   List<GeofenceModel> _geofences = [];
   UserProfile? _myProfile;
+  CircleMember? _selectedMemberForCard;
   bool _isLoadingMembers = false;
   LatLng _center = const LatLng(-6.2088, 106.8456); // Default: Jakarta
   String _mapLayer = 'standard'; // 'standard', 'satellite', 'dark'
@@ -652,6 +650,7 @@ class _MapViewScreenState extends State<MapViewScreen> {
     );
   }
 
+  // ignore: unused_element
   void _showQuickLoudSignalDialog() {
     final otherMembers = _members.where((m) => m.userId != _supa.currentUser?.id).toList();
 
@@ -780,6 +779,7 @@ class _MapViewScreenState extends State<MapViewScreen> {
     );
   }
 
+  // ignore: unused_element
   void _showQuickAmbientAudioDialog() {
     final otherMembers = _members.where((m) => m.userId != _supa.currentUser?.id).toList();
 
@@ -957,52 +957,131 @@ class _MapViewScreenState extends State<MapViewScreen> {
     required IconData icon,
     required VoidCallback onTap,
     String? tooltip,
-    Color iconColor = Colors.white,
+    Color? iconColor,
     int badgeCount = 0,
     bool isLoading = false,
   }) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: isLoading ? null : onTap,
-      child: Container(
-        width: 44,
-        height: 44,
-        decoration: BoxDecoration(
-          color: const Color(0xFF1E212B),
-          shape: BoxShape.circle,
-          boxShadow: const [
-            BoxShadow(color: Colors.black26, blurRadius: 6, offset: Offset(0, 2)),
-          ],
-        ),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            if (isLoading)
-              const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.blueAccent),
-              )
-            else
-              Icon(icon, color: iconColor, size: 20),
-            if (badgeCount > 0)
-              Positioned(
-                top: 4,
-                right: 4,
-                child: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: const BoxDecoration(
-                    color: Colors.red,
-                    shape: BoxShape.circle,
+    final effectiveIconColor = iconColor ?? const Color(0xFF1E3A8A);
+    return Tooltip(
+      message: tooltip ?? '',
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: isLoading ? null : onTap,
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            shape: BoxShape.circle,
+            border: Border.all(color: const Color(0xFFE2E8F0), width: 1.2),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x12000000),
+                blurRadius: 8,
+                offset: Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              if (isLoading)
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Color(0xFF1E3A8A),
                   ),
-                  child: Text(
-                    '$badgeCount',
-                    style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                )
+              else
+                Icon(icon, color: effectiveIconColor, size: 20),
+              if (badgeCount > 0)
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFC62828),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Text(
+                      '$badgeCount',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 9,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildFamilyAvatarStack() {
+    final displayMembers = _members.take(3).toList();
+    if (displayMembers.isEmpty) {
+      return Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E3A8A).withValues(alpha: 0.1),
+          shape: BoxShape.circle,
+          border: Border.all(color: const Color(0xFF1E3A8A), width: 1.5),
+        ),
+        child: const Icon(Icons.people_alt_rounded, size: 16, color: Color(0xFF1E3A8A)),
+      );
+    }
+    return SizedBox(
+      width: 28.0 + (displayMembers.length - 1) * 16.0,
+      height: 32,
+      child: Stack(
+        children: List.generate(displayMembers.length, (i) {
+          final m = displayMembers[i];
+          final isMe = m.userId == _supa.currentUser?.id;
+          final avatarUrl = isMe ? (_myProfile?.avatarUrl ?? m.profile?.avatarUrl) : m.profile?.avatarUrl;
+          final name = isMe ? 'Saya' : (m.profile?.fullName ?? 'A');
+          final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
+          return Positioned(
+            left: i * 16.0,
+            child: Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2),
+                color: isMe ? const Color(0xFF1E3A8A) : Colors.teal,
+                boxShadow: const [
+                  BoxShadow(color: Color(0x18000000), blurRadius: 4, offset: Offset(0, 1)),
+                ],
+              ),
+              child: ClipOval(
+                child: (avatarUrl != null && avatarUrl.isNotEmpty)
+                    ? Image.network(
+                        avatarUrl,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) => Center(
+                          child: Text(
+                            initial,
+                            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      )
+                    : Center(
+                        child: Text(
+                          initial,
+                          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+              ),
+            ),
+          );
+        }),
       ),
     );
   }
@@ -1021,97 +1100,52 @@ class _MapViewScreenState extends State<MapViewScreen> {
     final batteryLevel = isMe ? _locService.batteryLevel : (loc?.batteryLevel ?? 100);
     final isCharging = isMe ? false : (loc?.isCharging ?? false);
 
-    Color batteryColor = Colors.green;
+    Color batteryColor = const Color(0xFF16A34A);
     if (batteryLevel < 20) {
-      batteryColor = Colors.red;
+      batteryColor = const Color(0xFFC62828);
     } else if (batteryLevel < 50) {
-      batteryColor = Colors.orange;
+      batteryColor = const Color(0xFFF59E0B);
     }
 
-    final lat = isMe && _currentPosition != null ? _currentPosition!.latitude : (loc?.latitude ?? 0.0);
-    final lng = isMe && _currentPosition != null ? _currentPosition!.longitude : (loc?.longitude ?? 0.0);
-
-    final zone = _findGeofenceForLocation(lat, lng);
-    final hasZone = zone != null;
-    final zoneColor = hasZone ? _getGeofenceColor(zone.category) : (isMe ? Colors.blueAccent : Colors.indigo.shade800);
-    final zoneIcon = hasZone ? _getGeofenceIcon(zone.category) : (isMe ? Icons.my_location_rounded : Icons.directions_walk_rounded);
-    final zoneText = hasZone ? 'Di ${zone.name}' : (isMe ? 'Saya (Di sini)' : 'Bergerak');
+    final isSelected = _selectedMemberForCard?.userId == member.userId;
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () => MemberDetailSheet.show(context, member, widget.selectedCircle),
+      onTap: () {
+        setState(() {
+          _selectedMemberForCard = member;
+        });
+        MemberDetailSheet.show(context, member, widget.selectedCircle);
+      },
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Find My Kids Style Status Pill: [ 🏠 Di Rumah • 85% ⚡ ]
+          // Avatar Pin dengan Halo Cincin Biru
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: const [
-                BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 1)),
-              ],
-              border: Border.all(
-                color: hasZone ? zoneColor.withValues(alpha: 0.6) : (isMe ? Colors.blueAccent.withValues(alpha: 0.7) : Colors.grey.shade300),
-                width: isMe ? 1.5 : 1.2,
-              ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(zoneIcon, size: 11, color: zoneColor),
-                const SizedBox(width: 4),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 75),
-                  child: Text(
-                    zoneText,
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      color: zoneColor,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const SizedBox(width: 5),
-                Container(width: 1, height: 9, color: Colors.grey.shade300),
-                const SizedBox(width: 5),
-                Icon(
-                  isCharging ? Icons.battery_charging_full : Icons.battery_std,
-                  size: 11,
-                  color: batteryColor,
-                ),
-                Text(
-                  '$batteryLevel%',
-                  style: TextStyle(fontSize: 9, color: batteryColor, fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 3),
-
-          // Avatar Pin (Foto Profil / Inisial)
-          Container(
-            width: 42,
-            height: 42,
+            width: 46,
+            height: 46,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: isMe ? Colors.blueAccent : Colors.teal,
-              border: Border.all(color: Colors.white, width: 2.5),
+              color: isMe ? const Color(0xFF1E3A8A) : Colors.teal,
+              border: Border.all(
+                color: isSelected ? const Color(0xFF1E3A8A) : Colors.white,
+                width: 3,
+              ),
               boxShadow: [
-                if (isMe)
-                  BoxShadow(color: Colors.blueAccent.withValues(alpha: 0.45), blurRadius: 10, spreadRadius: 3),
-                const BoxShadow(color: Colors.black38, blurRadius: 6),
+                BoxShadow(
+                  color: (isMe ? const Color(0xFF1E3A8A) : Colors.teal).withValues(alpha: 0.35),
+                  blurRadius: 10,
+                  spreadRadius: 2,
+                ),
+                const BoxShadow(color: Color(0x22000000), blurRadius: 4, offset: Offset(0, 2)),
               ],
             ),
             child: ClipOval(
               child: (avatarUrl != null && avatarUrl.isNotEmpty)
                   ? Image.network(
                       avatarUrl,
-                      width: 42,
-                      height: 42,
+                      width: 46,
+                      height: 46,
                       fit: BoxFit.cover,
                       errorBuilder: (_, _, _) => Center(
                         child: Text(
@@ -1119,14 +1153,6 @@ class _MapViewScreenState extends State<MapViewScreen> {
                           style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
                         ),
                       ),
-                      loadingBuilder: (ctx, child, progress) => progress == null
-                          ? child
-                          : Center(
-                              child: Text(
-                                initials,
-                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-                              ),
-                            ),
                     )
                   : Center(
                       child: Text(
@@ -1134,6 +1160,39 @@ class _MapViewScreenState extends State<MapViewScreen> {
                         style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
                       ),
                     ),
+            ),
+          ),
+          const SizedBox(height: 3),
+
+          // Pill Baterai di Bawah Avatar (Reference UI Screen 1)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFE2E8F0), width: 1),
+              boxShadow: const [
+                BoxShadow(color: Color(0x18000000), blurRadius: 4, offset: Offset(0, 1)),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  isCharging ? Icons.battery_charging_full : Icons.battery_std,
+                  size: 11,
+                  color: batteryColor,
+                ),
+                const SizedBox(width: 2),
+                Text(
+                  '$batteryLevel%',
+                  style: const TextStyle(
+                    fontSize: 9,
+                    color: Color(0xFF111827),
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -1145,116 +1204,57 @@ class _MapViewScreenState extends State<MapViewScreen> {
     final name = _supa.currentUser?.userMetadata?['full_name'] as String? ?? 'Saya';
     final initials = name.isNotEmpty ? name[0].toUpperCase() : 'S';
     final battery = _locService.batteryLevel;
+    final avatarUrl = _myProfile?.avatarUrl;
 
-    Color batteryColor = Colors.green;
+    Color batteryColor = const Color(0xFF16A34A);
     if (battery < 20) {
-      batteryColor = Colors.red;
+      batteryColor = const Color(0xFFC62828);
     } else if (battery < 50) {
-      batteryColor = Colors.orange;
+      batteryColor = const Color(0xFFF59E0B);
     }
-
-    final zone = _findGeofenceForLocation(pos.latitude, pos.longitude);
-    final hasZone = zone != null;
-    final zoneColor = hasZone ? _getGeofenceColor(zone.category) : Colors.blueAccent;
-    final zoneIcon = hasZone ? _getGeofenceIcon(zone.category) : Icons.my_location_rounded;
-    final zoneText = hasZone ? 'Di ${zone.name}' : 'Saya (Di sini)';
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              widget.selectedCircle != null
-                  ? 'Lokasi Anda saat ini (${pos.latitude.toStringAsFixed(4)}, ${pos.longitude.toStringAsFixed(4)})'
-                  : 'Lokasi Anda saat ini. Pilih atau buat Lingkaran untuk membagikan dengan keluarga.',
-            ),
-            duration: const Duration(seconds: 3),
-            action: widget.selectedCircle == null && widget.onNavigateToCircles != null
-                ? SnackBarAction(
-                    label: 'LINGKARAN',
-                    textColor: Colors.blueAccent,
-                    onPressed: widget.onNavigateToCircles!,
-                  )
-                : null,
-          ),
+        final myMember = _members.cast<CircleMember?>().firstWhere(
+          (m) => m?.userId == _supa.currentUser?.id,
+          orElse: () => null,
         );
+        if (myMember != null) {
+          setState(() => _selectedMemberForCard = myMember);
+          MemberDetailSheet.show(context, myMember, widget.selectedCircle);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Lokasi Anda saat ini')),
+          );
+        }
       },
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Find My Kids Style Status Pill: [ 📍 Saya (Di sini) • 100% ⚡ ]
+          // Avatar Pin dengan Halo Cincin Biru
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: const [
-                BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 1)),
-              ],
-              border: Border.all(
-                color: Colors.blueAccent.withValues(alpha: 0.7),
-                width: 1.5,
-              ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(zoneIcon, size: 11, color: zoneColor),
-                const SizedBox(width: 4),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 80),
-                  child: Text(
-                    zoneText,
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      color: zoneColor,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const SizedBox(width: 5),
-                Container(width: 1, height: 9, color: Colors.grey.shade300),
-                const SizedBox(width: 5),
-                Icon(
-                  Icons.battery_std,
-                  size: 11,
-                  color: batteryColor,
-                ),
-                Text(
-                  '$battery%',
-                  style: TextStyle(fontSize: 9, color: batteryColor, fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 3),
-
-          // Glowing Blue Avatar Pin (Foto Profil / Inisial)
-          Container(
-            width: 42,
-            height: 42,
+            width: 46,
+            height: 46,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: Colors.blueAccent,
-              border: Border.all(color: Colors.white, width: 2.5),
+              color: const Color(0xFF1E3A8A),
+              border: Border.all(color: Colors.white, width: 3),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.blueAccent.withValues(alpha: 0.45),
+                  color: const Color(0xFF1E3A8A).withValues(alpha: 0.4),
                   blurRadius: 10,
-                  spreadRadius: 3,
+                  spreadRadius: 2,
                 ),
-                const BoxShadow(color: Colors.black38, blurRadius: 6),
+                const BoxShadow(color: Color(0x22000000), blurRadius: 4, offset: Offset(0, 2)),
               ],
             ),
             child: ClipOval(
-              child: (_myProfile?.avatarUrl != null && _myProfile!.avatarUrl!.isNotEmpty)
+              child: (avatarUrl != null && avatarUrl.isNotEmpty)
                   ? Image.network(
-                      _myProfile!.avatarUrl!,
-                      width: 42,
-                      height: 42,
+                      avatarUrl,
+                      width: 46,
+                      height: 46,
                       fit: BoxFit.cover,
                       errorBuilder: (_, _, _) => Center(
                         child: Text(
@@ -1262,14 +1262,6 @@ class _MapViewScreenState extends State<MapViewScreen> {
                           style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
                         ),
                       ),
-                      loadingBuilder: (ctx, child, progress) => progress == null
-                          ? child
-                          : Center(
-                              child: Text(
-                                initials,
-                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-                              ),
-                            ),
                     )
                   : Center(
                       child: Text(
@@ -1277,6 +1269,39 @@ class _MapViewScreenState extends State<MapViewScreen> {
                         style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
                       ),
                     ),
+            ),
+          ),
+          const SizedBox(height: 3),
+
+          // Pill Baterai di Bawah Avatar
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFE2E8F0), width: 1),
+              boxShadow: const [
+                BoxShadow(color: Color(0x18000000), blurRadius: 4, offset: Offset(0, 1)),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.battery_std,
+                  size: 11,
+                  color: batteryColor,
+                ),
+                const SizedBox(width: 2),
+                Text(
+                  '$battery%',
+                  style: const TextStyle(
+                    fontSize: 9,
+                    color: Color(0xFF111827),
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -1590,82 +1615,84 @@ class _MapViewScreenState extends State<MapViewScreen> {
                 ),
                 const SizedBox(width: 8),
 
-                // Center Floating Pill: [ Family ⌵ ] with Realtime Status Badge
+                // Center Floating Card: [ Family Avatar Stack + Name + Realtime Status ]
                 Expanded(
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
                     onTap: _showCircleSelectorSheet,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF1E212B),
+                        color: Colors.white,
                         borderRadius: BorderRadius.circular(24),
                         border: Border.all(
-                          color: _realtimeMovement
-                              ? Colors.greenAccent.withValues(alpha: 0.35)
-                              : Colors.white12,
+                          color: const Color(0xFFE2E8F0),
                           width: 1.2,
                         ),
                         boxShadow: const [
-                          BoxShadow(color: Colors.black26, blurRadius: 8, offset: Offset(0, 2)),
+                          BoxShadow(
+                            color: Color(0x12000000),
+                            blurRadius: 10,
+                            offset: Offset(0, 3),
+                          ),
                         ],
                       ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
+                      child: Row(
                         children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Icon(Icons.shield_outlined, color: Colors.blueAccent, size: 15),
-                              const SizedBox(width: 6),
-                              Flexible(
-                                child: Text(
-                                  widget.selectedCircle?.name ?? 'Pilih Lingkaran',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 13,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              const SizedBox(width: 4),
-                              const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white70, size: 18),
-                            ],
-                          ),
-                          const SizedBox(height: 2),
-                          GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTap: _toggleRealtimeMovement,
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
+                          _buildFamilyAvatarStack(),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
                               mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Container(
-                                  width: 6,
-                                  height: 6,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: _realtimeMovement ? Colors.greenAccent : Colors.grey,
-                                    boxShadow: _realtimeMovement
-                                        ? [
-                                            BoxShadow(
-                                              color: Colors.greenAccent.withValues(alpha: 0.7),
-                                              blurRadius: 4,
-                                              spreadRadius: 1,
-                                            )
-                                          ]
-                                        : null,
-                                  ),
+                                Row(
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        widget.selectedCircle?.name ?? 'Keluarga Utama',
+                                        style: const TextStyle(
+                                          color: Color(0xFF1E3A8A),
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 13,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 2),
+                                    const Icon(
+                                      Icons.keyboard_arrow_down_rounded,
+                                      color: Color(0xFF64748B),
+                                      size: 16,
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(width: 5),
-                                Text(
-                                  _realtimeMovement ? 'REALTIME: AKTIF' : 'REALTIME: MATI',
-                                  style: TextStyle(
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.bold,
-                                    letterSpacing: 0.5,
-                                    color: _realtimeMovement ? Colors.greenAccent : Colors.white38,
+                                const SizedBox(height: 2),
+                                GestureDetector(
+                                  behavior: HitTestBehavior.opaque,
+                                  onTap: _toggleRealtimeMovement,
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Container(
+                                        width: 6,
+                                        height: 6,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: _realtimeMovement ? const Color(0xFF16A34A) : const Color(0xFF94A3B8),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        _realtimeMovement ? 'REALTIME: AKTIF' : 'REALTIME: MATI',
+                                        style: TextStyle(
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.w700,
+                                          letterSpacing: 0.3,
+                                          color: _realtimeMovement ? const Color(0xFF16A34A) : const Color(0xFF64748B),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ],
@@ -1681,7 +1708,7 @@ class _MapViewScreenState extends State<MapViewScreen> {
                 // Notification Bell
                 _buildGlassButton(
                   icon: widget.activeAlerts.isNotEmpty ? Icons.notifications_active : Icons.notifications_none,
-                  iconColor: widget.activeAlerts.isNotEmpty ? Colors.redAccent : Colors.white,
+                  iconColor: widget.activeAlerts.isNotEmpty ? const Color(0xFFC62828) : const Color(0xFF1E3A8A),
                   badgeCount: widget.activeAlerts.length,
                   tooltip: 'Peringatan Darurat',
                   onTap: () {
@@ -1833,333 +1860,222 @@ class _MapViewScreenState extends State<MapViewScreen> {
             ),
           ),
 
-        // 3. Floating Quick-Action Bar (Find My Kids Pattern)
+        // Floating Controls Kanan Bawah
         Positioned(
-          left: 16,
-          right: 16,
-          bottom: _members.isNotEmpty ? 76 : 24,
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                // Sinyal Keras Pill
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: _showQuickLoudSignalDialog,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1E212B),
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 6)],
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: const [
-                        Icon(Icons.wifi_tethering, color: Colors.redAccent, size: 16),
-                        SizedBox(width: 6),
-                        Text(
-                          'Sinyal Keras',
-                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-
-                // Dengar Suara Pill (Find My Kids Pattern)
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: _showQuickAmbientAudioDialog,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1E212B),
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 6)],
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: const [
-                        Icon(Icons.mic, color: Colors.deepOrangeAccent, size: 16),
-                        SizedBox(width: 6),
-                        Text(
-                          'Dengar Suara',
-                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-
-                // Realtime Movements Toggle Pill
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: _toggleRealtimeMovement,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                    decoration: BoxDecoration(
-                      color: _realtimeMovement ? const Color(0xFF0F2E1E) : const Color(0xFF1E212B),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: _realtimeMovement ? Colors.greenAccent : Colors.white24,
-                        width: 1.2,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: _realtimeMovement
-                              ? Colors.greenAccent.withValues(alpha: 0.2)
-                              : Colors.black26,
-                          blurRadius: 6,
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          _realtimeMovement ? Icons.sensors_rounded : Icons.sensors_off_rounded,
-                          color: _realtimeMovement ? Colors.greenAccent : Colors.grey,
-                          size: 16,
-                        ),
-                        const SizedBox(width: 6),
-                        const Text(
-                          'Pergerakan Real-time:',
-                          style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
-                        ),
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: _realtimeMovement
-                                ? Colors.greenAccent.withValues(alpha: 0.25)
-                                : Colors.white10,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Container(
-                                width: 6,
-                                height: 6,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: _realtimeMovement ? Colors.greenAccent : Colors.grey,
-                                  boxShadow: _realtimeMovement
-                                      ? [
-                                          BoxShadow(
-                                            color: Colors.greenAccent.withValues(alpha: 0.8),
-                                            blurRadius: 3,
-                                          )
-                                        ]
-                                      : null,
-                                ),
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                _realtimeMovement ? 'AKTIF' : 'MATI',
-                                style: TextStyle(
-                                  color: _realtimeMovement ? Colors.greenAccent : Colors.white54,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-
-                // Quick Add Geofence Shortcut
-                if (widget.selectedCircle != null)
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () async {
-                      final newGeo = await GeofenceMapPicker.open(
-                        context,
-                        circleId: widget.selectedCircle!.id,
-                        initialCenter: _center,
-                      );
-                      if (newGeo != null && mounted) {
-                        await _loadMembers(widget.selectedCircle!.id);
-                      }
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1E212B),
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 6)],
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: const [
-                          Icon(Icons.add_location_alt_rounded, color: Colors.amber, size: 16),
-                          SizedBox(width: 4),
-                          Text(
-                            '+ Tempat',
-                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
-
-        // 4. Bottom Member Horizontal Quick Bar
-        if (_members.isNotEmpty)
-          Positioned(
-            left: 16,
-            right: 76,
-            bottom: 16,
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: _members.map((m) {
-                  final isMe = m.userId == _supa.currentUser?.id;
-                  final nickname = MemberNicknameService.instance.getNickname(m.userId);
-                  final fullName = m.profile?.fullName ?? 'Anggota';
-                  final name = isMe ? 'Saya' : (nickname ?? fullName);
-                  final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
-                  final avatarUrl = isMe ? (_myProfile?.avatarUrl ?? m.profile?.avatarUrl) : m.profile?.avatarUrl;
-                  final zone = m.location != null
-                      ? _findGeofenceForLocation(m.location!.latitude, m.location!.longitude)
-                      : null;
-
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8.0),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(20),
-                      onTap: () {
-                        if (m.location != null) {
-                          _mapController.move(
-                            LatLng(m.location!.latitude, m.location!.longitude),
-                            16,
-                          );
-                        }
-                        MemberDetailSheet.show(context, m, widget.selectedCircle);
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF1E212B),
-                          borderRadius: BorderRadius.circular(20),
-                          boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 6)],
-                        ),
-                        child: Row(
-                          children: [
-                            CircleAvatar(
-                              radius: 13,
-                              backgroundColor: isMe ? Colors.blueAccent : Colors.teal,
-                              backgroundImage: (avatarUrl != null && avatarUrl.isNotEmpty)
-                                  ? NetworkImage(avatarUrl)
-                                  : null,
-                              child: (avatarUrl == null || avatarUrl.isEmpty)
-                                  ? Text(
-                                      initial,
-                                      style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold),
-                                    )
-                                  : null,
-                            ),
-                            const SizedBox(width: 8),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  name.length > 9 ? '${name.substring(0, 9)}..' : name,
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                                if (zone != null)
-                                  Text(
-                                    'Di ${zone.name}',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      color: _getGeofenceColor(zone.category),
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                              ],
-                            ),
-                            if (m.location != null) ...[
-                              const SizedBox(width: 6),
-                              Icon(
-                                m.location!.isCharging ? Icons.battery_charging_full : Icons.battery_std,
-                                size: 13,
-                                color: m.location!.batteryLevel < 20 ? Colors.red : Colors.greenAccent,
-                              ),
-                              Text(
-                                '${m.location!.batteryLevel}%',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: m.location!.batteryLevel < 20 ? Colors.red : Colors.greenAccent,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-          ),
-
-        // 5. Bottom Right Floating Controls (My Location & Fit All)
-        Positioned(
-          bottom: 16,
+          bottom: 96,
           right: 16,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              FloatingActionButton.small(
-                heroTag: 'my_loc_btn',
-                backgroundColor: const Color(0xFF1E212B),
-                foregroundColor: Colors.blueAccent,
-                onPressed: _moveToMyLocation,
-                child: const Icon(Icons.my_location),
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: const Color(0xFFE2E8F0), width: 1.2),
+                  boxShadow: const [
+                    BoxShadow(color: Color(0x15000000), blurRadius: 8, offset: Offset(0, 2)),
+                  ],
+                ),
+                child: IconButton(
+                  icon: const Icon(Icons.my_location, color: Color(0xFF1E3A8A), size: 20),
+                  tooltip: 'Lokasi Saya',
+                  onPressed: _moveToMyLocation,
+                ),
               ),
               const SizedBox(height: 8),
-              FloatingActionButton.small(
-                heroTag: 'fit_all_btn',
-                backgroundColor: const Color(0xFF1E212B),
-                foregroundColor: Colors.white,
-                tooltip: 'Lihat Semua Anggota',
-                onPressed: () {
-                  final validLocs = _members
-                      .where((m) => m.location != null)
-                      .map((m) => LatLng(m.location!.latitude, m.location!.longitude))
-                      .toList();
-                  if (validLocs.isNotEmpty) {
-                    final bounds = LatLngBounds.fromPoints(validLocs);
-                    _mapController.fitCamera(
-                      CameraFit.bounds(
-                        bounds: bounds,
-                        padding: const EdgeInsets.all(50),
-                      ),
-                    );
-                  }
-                },
-                child: const Icon(Icons.zoom_out_map),
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: const Color(0xFFE2E8F0), width: 1.2),
+                  boxShadow: const [
+                    BoxShadow(color: Color(0x15000000), blurRadius: 8, offset: Offset(0, 2)),
+                  ],
+                ),
+                child: IconButton(
+                  icon: const Icon(Icons.zoom_out_map, color: Color(0xFF1E3A8A), size: 20),
+                  tooltip: 'Lihat Semua Anggota',
+                  onPressed: () {
+                    final validLocs = _members
+                        .where((m) => m.location != null)
+                        .map((m) => LatLng(m.location!.latitude, m.location!.longitude))
+                        .toList();
+                    if (_currentPosition != null) {
+                      validLocs.add(LatLng(_currentPosition!.latitude, _currentPosition!.longitude));
+                    }
+                    if (validLocs.isNotEmpty) {
+                      final bounds = LatLngBounds.fromPoints(validLocs);
+                      _mapController.fitCamera(
+                        CameraFit.bounds(
+                          bounds: bounds,
+                          padding: const EdgeInsets.all(50),
+                        ),
+                      );
+                    }
+                  },
+                ),
               ),
             ],
           ),
         ),
+
+        // Floating Bottom Member Card (Sesuai Referensi Layar 1)
+        Positioned(
+          left: 16,
+          right: 16,
+          bottom: 16,
+          child: _buildFloatingBottomMemberCard(),
+        ),
       ],
+    );
+  }
+
+  Widget _buildFloatingBottomMemberCard() {
+    final myUid = _supa.currentUser?.id;
+    final selectedMember = _selectedMemberForCard ??
+        _members.cast<CircleMember?>().firstWhere(
+          (m) => m?.userId == myUid,
+          orElse: () => _members.isNotEmpty ? _members.first : null,
+        );
+
+    final isMe = selectedMember == null || selectedMember.userId == myUid;
+    final nickname = selectedMember != null ? MemberNicknameService.instance.getNickname(selectedMember.userId) : null;
+    final fullName = selectedMember?.profile?.fullName ?? (isMe ? 'Saya' : 'Anggota');
+    final name = isMe ? 'Saya' : (nickname ?? fullName);
+    final initial = name.isNotEmpty ? name[0].toUpperCase() : 'S';
+    final avatarUrl = isMe ? (_myProfile?.avatarUrl ?? selectedMember?.profile?.avatarUrl) : selectedMember.profile?.avatarUrl;
+
+    String statusText = 'Di sini';
+    if (selectedMember != null && selectedMember.location != null) {
+      final zone = _findGeofenceForLocation(selectedMember.location!.latitude, selectedMember.location!.longitude);
+      if (zone != null) {
+        statusText = 'Di ${zone.name}';
+      } else if (!isMe) {
+        statusText = 'Aktif membagikan lokasi';
+      }
+    } else if (isMe && _currentPosition != null) {
+      final zone = _findGeofenceForLocation(_currentPosition!.latitude, _currentPosition!.longitude);
+      if (zone != null) {
+        statusText = 'Di ${zone.name}';
+      }
+    }
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        if (selectedMember != null) {
+          MemberDetailSheet.show(context, selectedMember, widget.selectedCircle);
+        } else if (_members.isNotEmpty) {
+          MemberDetailSheet.show(context, _members.first, widget.selectedCircle);
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: const Color(0xFFE2E8F0), width: 1.2),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x14000000),
+              blurRadius: 14,
+              offset: Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isMe ? const Color(0xFF1E3A8A) : Colors.teal,
+                border: Border.all(color: const Color(0xFF1E3A8A), width: 2),
+                boxShadow: const [
+                  BoxShadow(color: Color(0x15000000), blurRadius: 4, offset: Offset(0, 2)),
+                ],
+              ),
+              child: ClipOval(
+                child: (avatarUrl != null && avatarUrl.isNotEmpty)
+                    ? Image.network(
+                        avatarUrl,
+                        width: 44,
+                        height: 44,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) => Center(
+                          child: Text(
+                            initial,
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                          ),
+                        ),
+                      )
+                    : Center(
+                        child: Text(
+                          initial,
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                        ),
+                      ),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name,
+                    style: const TextStyle(
+                      color: Color(0xFF111827),
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 3),
+                  Row(
+                    children: [
+                      Container(
+                        width: 7,
+                        height: 7,
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Color(0xFF16A34A),
+                        ),
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        statusText,
+                        style: const TextStyle(
+                          color: Color(0xFF16A34A),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: const Color(0xFFF5F7FB),
+                shape: BoxShape.circle,
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: const Icon(
+                Icons.chevron_right_rounded,
+                color: Color(0xFF64748B),
+                size: 22,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
