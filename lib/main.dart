@@ -10,6 +10,7 @@ import 'screens/lost_mode_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'services/phone_protection_service.dart';
 import 'services/push_notification_service.dart';
+import 'services/fall_detection_service.dart';
 import 'services/supabase_service.dart';
 import 'theme/app_theme.dart';
 
@@ -27,6 +28,7 @@ void main() async {
   unawaited(PhoneProtectionService().initialize());
   // Initialize Push Notification Service
   unawaited(PushNotificationService().initialize());
+  unawaited(FallDetectionService().initialize());
 }
 
 class LingkarAmanApp extends StatefulWidget {

@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -26,6 +28,13 @@ class PhoneProtectionService {
   static const String _kLostModeSiren = 'lost_mode_siren';
   static const String _kLostModeFakeShutdown = 'lost_mode_fake_shutdown';
   static const String _kLostModePin = 'lost_mode_pin';
+  static const String _kLostModePinSalt = 'lost_mode_pin_salt';
+  static const String _kLostModePinHash = 'lost_mode_pin_hash';
+
+  String _hashPinWithSalt(String pin, String salt) {
+    final bytes = utf8.encode('$salt:$pin:lingkaraman_vault_secret');
+    return sha256.convert(bytes).toString();
+  }
   static const String _kIntruderFailedAttempts = 'intruder_failed_attempts';
   static const String _kVaultLocked = 'vault_locked';
 
@@ -562,26 +571,6 @@ class PhoneProtectionService {
     await _applyLocalLostMode(cmd);
   }
 
-  Future<void> applyRemoteLostModeFromPayload({
-    required String contactPhone,
-    required String message,
-    required bool enableSiren,
-    required bool enableFakeShutdown,
-  }) async {
-    final cmd = LostModeCommand(
-      id: 'fcm_remote_${DateTime.now().millisecondsSinceEpoch}',
-      targetUserId: _currentUserId ?? '',
-      senderId: 'fcm_push',
-      isActive: true,
-      contactPhone: contactPhone,
-      message: message,
-      enableSiren: enableSiren,
-      enableFakeShutdown: enableFakeShutdown,
-      updatedAt: DateTime.now(),
-    );
-    await _applyLocalLostMode(cmd);
-  }
-
   Future<bool> isLostModeActiveForUser(String targetUserId) async {
     if (isLostModeActive && activeLostMode?.targetUserId == targetUserId) {
       return true;
@@ -710,9 +699,27 @@ class PhoneProtectionService {
   // 3. JEBAKAN PENYUSUP / SALAH PIN
   Future<bool> verifyUnlockPin(String inputPin, {String? circleId}) async {
     final prefs = await SharedPreferences.getInstance();
-    final correctPin = prefs.getString(_kLostModePin) ?? '1234';
+    bool isMatch = false;
 
-    if (inputPin == correctPin) {
+    final storedHash = prefs.getString(_kLostModePinHash);
+    final salt = prefs.getString(_kLostModePinSalt);
+    if (storedHash != null && salt != null) {
+      isMatch = (_hashPinWithSalt(inputPin, salt) == storedHash);
+    } else {
+      final legacyPin = prefs.getString(_kLostModePin);
+      if (legacyPin != null && legacyPin.isNotEmpty) {
+        if (inputPin == legacyPin) {
+          isMatch = true;
+          await setOwnerPin(inputPin);
+        }
+      } else if (inputPin == '1234') {
+        // Fallback default PIN jika belum diset oleh pemilik
+        isMatch = true;
+        await setOwnerPin('1234');
+      }
+    }
+
+    if (isMatch) {
       _failedPinAttempts = 0;
       await prefs.setInt(_kIntruderFailedAttempts, 0);
       await disableNativeAntiBypass();
@@ -824,12 +831,28 @@ class PhoneProtectionService {
 
   Future<void> setOwnerPin(String newPin) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kLostModePin, newPin);
+    var salt = prefs.getString(_kLostModePinSalt);
+    if (salt == null || salt.isEmpty) {
+      salt = DateTime.now().microsecondsSinceEpoch.toString();
+      await prefs.setString(_kLostModePinSalt, salt);
+    }
+    final hash = _hashPinWithSalt(newPin, salt);
+    await prefs.setString(_kLostModePinHash, hash);
+    // Bersihkan legacy plaintext PIN jika pernah tersimpan
+    await prefs.remove(_kLostModePin);
+  }
+
+  Future<bool> hasOwnerPin() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.containsKey(_kLostModePinHash) || prefs.containsKey(_kLostModePin);
   }
 
   Future<String> getOwnerPin() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_kLostModePin) ?? '1234';
+    if (prefs.containsKey(_kLostModePinHash) || prefs.containsKey(_kLostModePin)) {
+      return 'SET';
+    }
+    return '';
   }
 
   // 4. PURA-PURA MATI (FAKE SHUTDOWN / STEALTH MODE)
@@ -913,8 +936,26 @@ class PhoneProtectionService {
 
   Future<bool> unlockVault(String pin) async {
     final prefs = await SharedPreferences.getInstance();
-    final correctPin = prefs.getString(_kLostModePin) ?? '1234';
-    if (pin == correctPin) {
+    bool isMatch = false;
+
+    final storedHash = prefs.getString(_kLostModePinHash);
+    final salt = prefs.getString(_kLostModePinSalt);
+    if (storedHash != null && salt != null) {
+      isMatch = (_hashPinWithSalt(pin, salt) == storedHash);
+    } else {
+      final legacyPin = prefs.getString(_kLostModePin);
+      if (legacyPin != null && legacyPin.isNotEmpty) {
+        if (pin == legacyPin) {
+          isMatch = true;
+          await setOwnerPin(pin);
+        }
+      } else if (pin == '1234') {
+        isMatch = true;
+        await setOwnerPin('1234');
+      }
+    }
+
+    if (isMatch) {
       _isVaultLocked = false;
       await prefs.setBool(_kVaultLocked, false);
       return true;

@@ -71,8 +71,9 @@ class IntruderCameraService {
       final localTarget = File('${appDir.path}/intruder_$timestamp.jpg');
       await imageFile.copy(localTarget.path);
 
-      // 7. Upload to Supabase Storage bucket 'ambient_audio' pada folder 'intruder_photos/intruder_$timestamp.jpg'
-      final storagePath = 'intruder_photos/intruder_$timestamp.jpg';
+      final effectiveUid = userId ?? Supabase.instance.client.auth.currentUser?.id ?? 'anonymous';
+      // 7. Upload to Supabase Storage bucket 'ambient_audio' pada folder '<uid>/intruder_photos/intruder_$timestamp.jpg' (SEC-02)
+      final storagePath = '$effectiveUid/intruder_photos/intruder_$timestamp.jpg';
 
       String? publicUrl;
       try {

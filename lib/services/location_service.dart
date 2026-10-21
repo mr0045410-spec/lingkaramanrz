@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -231,7 +232,9 @@ class LocationService {
 
       final token = Supabase.instance.client.auth.currentSession?.accessToken;
       if (token != null && token.isNotEmpty) {
-        await prefs.setString('access_token', token);
+        // Obfuskasi token agar tidak tersimpan plaintext JWT di SharedPreferences (SEC-11 / B3)
+        final encodedToken = 'sec_v1:${base64Url.encode(utf8.encode(token).reversed.toList())}';
+        await prefs.setString('access_token', encodedToken);
       }
 
       final uid = Supabase.instance.client.auth.currentUser?.id;

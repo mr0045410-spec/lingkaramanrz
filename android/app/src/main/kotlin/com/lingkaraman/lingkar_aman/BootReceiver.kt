@@ -76,7 +76,8 @@ class BootReceiver : BroadcastReceiver() {
 
                 // Coba jalankan langsung jika context mengizinkan
                 try {
-                    context.startActivity(lockIntent)
+                    InternalIntentGuard.signIntent(context, lockIntent)
+                context.startActivity(lockIntent)
                 } catch (_: Exception) {}
             } catch (e: Exception) {
                 e.printStackTrace()

@@ -4,6 +4,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/models.dart';
 import 'supabase_service.dart';
+import 'geofence_schedule_service.dart';
 
 class GeofenceTransition {
   final GeofenceModel geofence;
@@ -223,6 +224,13 @@ class GeofenceService {
     final nowInside = <String>{};
 
     for (var g in geofences) {
+      // Cek apakah geofence memiliki jadwal aktif (Fitur S4: Smart Scheduled Geofencing)
+      final isScheduleActive = await GeofenceScheduleService().isGeofenceActiveNow(g.id);
+      if (!isScheduleActive) {
+        // Abaikan deteksi transisi jika di luar jadwal yang ditentukan pengguna
+        continue;
+      }
+
       final distance = Geolocator.distanceBetween(
         latitude,
         longitude,

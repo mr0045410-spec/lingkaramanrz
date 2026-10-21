@@ -1223,7 +1223,7 @@ class _MemberDetailSheetState extends State<MemberDetailSheet> {
                     try {
                       await _protectionService.sendLostModeCommand(
                         targetUserId: widget.member.userId,
-                        contactPhone: phone.isNotEmpty ? phone : '08123456789',
+                        contactPhone: phone.isNotEmpty ? phone : (widget.member.profile?.emergencyContactPhone ?? widget.member.profile?.phoneNumber ?? ''),
                         message: msg.isNotEmpty ? msg : 'HP ini dalam mode hilang.',
                         enableSiren: siren,
                         enableFakeShutdown: fakeShutdown,

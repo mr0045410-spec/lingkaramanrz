@@ -341,6 +341,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
     required VoidCallback onTap,
   }) {
     return Container(
+      width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         color: AppColors.bgSecondary,
@@ -351,6 +352,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
         ),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Container(
             width: 44,
@@ -369,6 +371,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
                   title,
@@ -389,10 +392,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
               ],
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           if (isGranted)
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
                 color: const Color(0xFFDCFCE7),
                 borderRadius: BorderRadius.circular(10),
@@ -420,11 +423,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primaryNavy,
                   foregroundColor: Colors.white,
+                  minimumSize: const Size(76, 36),
+                  maximumSize: const Size(100, 36),
                   padding: const EdgeInsets.symmetric(horizontal: 14),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
                   elevation: 0,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
                 onPressed: onTap,
                 child: const Text(

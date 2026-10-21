@@ -138,6 +138,7 @@ class SosPowerService : Service() {
             putExtra("trigger_sos_immediately", true)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         }
+        InternalIntentGuard.signIntent(this, sosIntent)
         startActivity(sosIntent)
 
         // Trigger via direct sender (if Flutter is dead, sends direct HTTP POST to Supabase REST)

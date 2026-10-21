@@ -9,7 +9,8 @@ import '../widgets/member_detail_sheet.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_components.dart';
 import '../services/member_nickname_service.dart';
-import '../services/sound_settings_service.dart';
+
+import '../services/geofence_schedule_service.dart';
 
 class CircleScreen extends StatefulWidget {
   final List<CircleModel> circles;
@@ -32,14 +33,12 @@ class CircleScreen extends StatefulWidget {
 class _CircleScreenState extends State<CircleScreen> with SingleTickerProviderStateMixin {
   final SupabaseService _supa = SupabaseService();
   final GeofenceService _geofenceService = GeofenceService();
-  final TextEditingController _msgController = TextEditingController();
-  final ScrollController _chatScrollController = ScrollController();
-
   late TabController _tabController;
   List<CircleMember> _members = [];
-  List<CircleMessage> _messages = [];
   List<GeofenceModel> _geofences = [];
   List<GeofenceEventModel> _geofenceEvents = [];
+  final GeofenceScheduleService _scheduleService = GeofenceScheduleService();
+  Map<String, GeofenceSchedule> _schedules = {};
   bool _isLoading = false;
 
   void _onNicknamesChanged() {
@@ -121,11 +120,10 @@ class _CircleScreenState extends State<CircleScreen> with SingleTickerProviderSt
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 2, vsync: this);
     MemberNicknameService.instance.addListener(_onNicknamesChanged);
     if (widget.selectedCircle != null) {
       _loadData(widget.selectedCircle!.id);
-      _listenToChat(widget.selectedCircle!.id);
     }
   }
 
@@ -135,7 +133,6 @@ class _CircleScreenState extends State<CircleScreen> with SingleTickerProviderSt
     if (widget.selectedCircle?.id != oldWidget.selectedCircle?.id) {
       if (widget.selectedCircle != null) {
         _loadData(widget.selectedCircle!.id);
-        _listenToChat(widget.selectedCircle!.id);
       }
     }
   }
@@ -144,78 +141,29 @@ class _CircleScreenState extends State<CircleScreen> with SingleTickerProviderSt
   void dispose() {
     MemberNicknameService.instance.removeListener(_onNicknamesChanged);
     _tabController.dispose();
-    _msgController.dispose();
-    _chatScrollController.dispose();
     super.dispose();
-  }
-
-  void _listenToChat(String circleId) {
-    _supa.subscribeToMessages(circleId, (newMsg) {
-      if (mounted) {
-        setState(() {
-          _messages.add(newMsg);
-        });
-        _scrollToBottom();
-
-        // Notifikasi & nada chat jika pesan berasal dari anggota lain
-        if (newMsg.userId != _supa.currentUser?.id) {
-          SoundSettingsService().previewSound('bubble_pop');
-          if (_tabController.index != 2) {
-            final nickname = MemberNicknameService.instance.getNickname(newMsg.userId);
-            final sName = nickname ?? newMsg.senderProfile?.fullName ?? 'Anggota';
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                behavior: SnackBarBehavior.floating,
-                backgroundColor: const Color(0xFF1E3A8A),
-                duration: const Duration(seconds: 3),
-                content: Text(
-                  '💬 $sName: ${newMsg.message}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                action: SnackBarAction(
-                  label: 'Buka Obrolan',
-                  textColor: Colors.amberAccent,
-                  onPressed: () => _tabController.animateTo(2),
-                ),
-              ),
-            );
-          }
-        }
-      }
-    });
   }
 
   Future<void> _loadData(String circleId) async {
     setState(() => _isLoading = true);
     try {
       final members = await _supa.getCircleMembers(circleId);
-      final messages = await _supa.getMessages(circleId);
       final geofences = await _geofenceService.getGeofences(circleId);
       final events = await _geofenceService.getRecentEvents(circleId);
+      final Map<String, GeofenceSchedule> loadedSchedules = {};
+      for (final g in geofences) {
+        loadedSchedules[g.id] = await _scheduleService.getSchedule(g.id);
+      }
       if (mounted) {
         setState(() {
           _members = members;
-          _messages = messages;
           _geofences = geofences;
           _geofenceEvents = events;
+          _schedules = loadedSchedules;
         });
-        _scrollToBottom();
       }
     } catch (_) {}
     if (mounted) setState(() => _isLoading = false);
-  }
-
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_chatScrollController.hasClients) {
-        _chatScrollController.animateTo(
-          _chatScrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      }
-    });
   }
 
   Future<void> _showCreateCircleDialog() async {
@@ -308,22 +256,6 @@ class _CircleScreenState extends State<CircleScreen> with SingleTickerProviderSt
     );
   }
 
-  Future<void> _sendMessage() async {
-    final text = _msgController.text.trim();
-    if (text.isEmpty || widget.selectedCircle == null) return;
-
-    _msgController.clear();
-    try {
-      await _supa.sendMessage(widget.selectedCircle!.id, text);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gagal kirim pesan: $e')),
-        );
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final circle = widget.selectedCircle;
@@ -358,7 +290,6 @@ class _CircleScreenState extends State<CircleScreen> with SingleTickerProviderSt
                 tabs: const [
                   Tab(icon: Icon(Icons.people), text: 'Anggota'),
                   Tab(icon: Icon(Icons.fmd_good_outlined), text: 'Zona Aman'),
-                  Tab(icon: Icon(Icons.chat_bubble_outline), text: 'Obrolan'),
                 ],
               )
             : null,
@@ -394,92 +325,7 @@ class _CircleScreenState extends State<CircleScreen> with SingleTickerProviderSt
                 ],
               ),
             )
-          : Column(
-              children: [
-                // KARTU BIRU TUA (NAVY) KODE UNDANGAN KELUARGA (Sesuai Referensi Layar 2)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 22),
-                    decoration: BoxDecoration(
-                      color: AppColors.primaryNavy,
-                      borderRadius: BorderRadius.circular(22),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppColors.primaryNavy.withOpacity(0.25),
-                          blurRadius: 14,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: const [
-                            Icon(Icons.groups_rounded, color: Colors.white70, size: 20),
-                            SizedBox(width: 8),
-                            Text(
-                              'Kode Undangan Keluarga',
-                              style: TextStyle(
-                                color: Colors.white70,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        // Kode Besar Putih
-                        Text(
-                          circle.inviteCode,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 30,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 3,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        // Tombol Putih Kapsul: "Salin Kode"
-                        ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            foregroundColor: AppColors.primaryNavy,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
-                            elevation: 0,
-                          ),
-                          icon: const Icon(Icons.copy_rounded, size: 16),
-                          label: const Text(
-                            'Salin Kode',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13,
-                            ),
-                          ),
-                          onPressed: () {
-                            Clipboard.setData(ClipboardData(text: circle.inviteCode));
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                backgroundColor: AppColors.primaryNavy,
-                                behavior: SnackBarBehavior.floating,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                content: const Text('Kode undangan berhasil disalin!'),
-                              ),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
-                // Tabs Body
-                Expanded(
-                  child: TabBarView(
+          : TabBarView(
                     controller: _tabController,
                     children: [
                       // Tab 1: Member List
@@ -487,11 +333,14 @@ class _CircleScreenState extends State<CircleScreen> with SingleTickerProviderSt
                           ? const Center(child: CircularProgressIndicator())
                           : RefreshIndicator(
                               onRefresh: () => _loadData(circle.id),
-                              child: ListView.separated(
+                              child: ListView.builder(
                               padding: const EdgeInsets.all(16),
-                              itemCount: _members.length,
-                              separatorBuilder: (_, _) => const Divider(),
-                              itemBuilder: (ctx, i) {
+                              itemCount: _members.length + 1,
+                              itemBuilder: (ctx, index) {
+                                if (index == 0) {
+                                  return _buildInviteCodeCard(circle);
+                                }
+                                final i = index - 1;
                                 final m = _members[i];
                                 final isMe = m.userId == _supa.currentUser?.id;
                                 final nickname = MemberNicknameService.instance.getNickname(m.userId);
@@ -620,133 +469,9 @@ class _CircleScreenState extends State<CircleScreen> with SingleTickerProviderSt
                       // Tab 2: Zona Aman (Geofencing)
                       _buildGeofencesTab(circle),
 
-                      // Tab 3: Chat / Feed Komunitas
-                      Column(
-                        children: [
-                          Expanded(
-                            child: _messages.isEmpty
-                                ? const Center(
-                                    child: Text(
-                                      'Belum ada obrolan di lingkaran ini.\nKirim kabar pertama sekarang!',
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(color: Colors.grey),
-                                    ),
-                                  )
-                                : ListView.builder(
-                                    controller: _chatScrollController,
-                                    padding: const EdgeInsets.all(12),
-                                    itemCount: _messages.length,
-                                    itemBuilder: (ctx, i) {
-                                      final msg = _messages[i];
-                                      final isMe = msg.userId == _supa.currentUser?.id;
-                                      final nickname = MemberNicknameService.instance.getNickname(msg.userId);
-                                      final fullName = msg.senderProfile?.fullName ?? 'Anggota';
-                                      final senderName = isMe ? 'Saya' : (nickname ?? fullName);
-                                      final senderAvatar = msg.senderProfile?.avatarUrl;
+                      ],
 
-                                      return Padding(
-                                        padding: const EdgeInsets.symmetric(vertical: 4),
-                                        child: Row(
-                                          mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
-                                          crossAxisAlignment: CrossAxisAlignment.end,
-                                          children: [
-                                            if (!isMe) ...[
-                                              CircleAvatar(
-                                                radius: 14,
-                                                backgroundColor: Colors.indigo.shade100,
-                                                backgroundImage: (senderAvatar != null && senderAvatar.isNotEmpty)
-                                                    ? NetworkImage(senderAvatar)
-                                                    : null,
-                                                child: (senderAvatar == null || senderAvatar.isEmpty)
-                                                    ? Text(
-                                                        senderName.isNotEmpty ? senderName[0].toUpperCase() : '?',
-                                                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.indigo.shade900),
-                                                      )
-                                                    : null,
-                                              ),
-                                              const SizedBox(width: 6),
-                                            ],
-                                            Flexible(
-                                              child: Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                                decoration: BoxDecoration(
-                                                  color: isMe ? Colors.indigo.shade600 : Colors.grey.shade200,
-                                                  borderRadius: BorderRadius.circular(16),
-                                                ),
-                                                child: Column(
-                                                  crossAxisAlignment:
-                                                      isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                                                  children: [
-                                                    if (!isMe)
-                                                      Text(
-                                                        senderName,
-                                                        style: TextStyle(
-                                                          fontSize: 11,
-                                                          fontWeight: FontWeight.bold,
-                                                          color: Colors.indigo.shade900,
-                                                        ),
-                                                      ),
-                                              Text(
-                                                msg.message,
-                                                style: TextStyle(
-                                                  color: isMe ? Colors.white : Colors.black87,
-                                                  fontSize: 14,
-                                                ),
-                                              ),
-                                              const SizedBox(height: 2),
-                                              Text(
-                                                DateFormat('HH:mm').format(msg.createdAt),
-                                                style: TextStyle(
-                                                  fontSize: 9,
-                                                  color: isMe ? Colors.white70 : Colors.grey.shade600,
-                                                ),
-                                              ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      );
-                                    },
-                                  ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                            color: Colors.white,
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: TextField(
-                                    controller: _msgController,
-                                    decoration: const InputDecoration(
-                                      hintText: 'Ketik pesan / kabar...',
-                                      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                                      border: OutlineInputBorder(
-                                        borderRadius: BorderRadius.all(Radius.circular(24)),
-                                      ),
-                                    ),
-                                    onSubmitted: (_) => _sendMessage(),
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                CircleAvatar(
-                                  backgroundColor: Colors.indigo,
-                                  child: IconButton(
-                                    icon: const Icon(Icons.send, color: Colors.white, size: 20),
-                                    onPressed: _sendMessage,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
                   ),
-                ),
-              ],
-            ),
     );
   }
 
@@ -791,6 +516,237 @@ class _CircleScreenState extends State<CircleScreen> with SingleTickerProviderSt
         }
       }
     }
+  }
+
+
+  Future<void> _showGeofenceScheduleDialog(GeofenceModel geo) async {
+    final currentSchedule = _schedules[geo.id] ?? await _scheduleService.getSchedule(geo.id);
+    bool isEnabled = currentSchedule.isEnabled;
+    TimeOfDay startTime = TimeOfDay(hour: currentSchedule.startHour, minute: currentSchedule.startMinute);
+    TimeOfDay endTime = TimeOfDay(hour: currentSchedule.endHour, minute: currentSchedule.endMinute);
+    List<int> selectedDays = List<int>.from(currentSchedule.daysOfWeek);
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 20,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade300,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.indigo.shade50,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Icon(Icons.alarm_on_rounded, color: Colors.indigo.shade700, size: 24),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Jadwal Cerdas: ${geo.name}',
+                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                              ),
+                              const SizedBox(height: 2),
+                              const Text(
+                                'Fitur S4: Otomatisasi jam aktif zona aman',
+                                style: TextStyle(fontSize: 12, color: Colors.black54),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text(
+                        'Aktifkan Jadwal Waktu',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
+                      subtitle: const Text(
+                        'Default NONAKTIF (24 Jam). Jika diaktifkan, hanya memantau pada jam & hari yang dipilih.',
+                        style: TextStyle(fontSize: 12, color: Colors.black54),
+                      ),
+                      activeColor: Colors.indigo,
+                      value: isEnabled,
+                      onChanged: (val) {
+                        setModalState(() => isEnabled = val);
+                      },
+                    ),
+                    if (isEnabled) ...[
+                      const Divider(height: 24),
+                      const Text(
+                        'Rentang Jam Aktif',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                              icon: const Icon(Icons.play_arrow_rounded, color: Colors.green),
+                              label: Text('Mulai: ${startTime.format(context)}'),
+                              onPressed: () async {
+                                final picked = await showTimePicker(
+                                  context: context,
+                                  initialTime: startTime,
+                                );
+                                if (picked != null) {
+                                  setModalState(() => startTime = picked);
+                                }
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                              icon: const Icon(Icons.stop_rounded, color: Colors.red),
+                              label: Text('Selesai: ${endTime.format(context)}'),
+                              onPressed: () async {
+                                final picked = await showTimePicker(
+                                  context: context,
+                                  initialTime: endTime,
+                                );
+                                if (picked != null) {
+                                  setModalState(() => endTime = picked);
+                                }
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'Hari Aktif',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        children: [
+                          _buildDayChip('Sen', 1, selectedDays, setModalState),
+                          _buildDayChip('Sel', 2, selectedDays, setModalState),
+                          _buildDayChip('Rab', 3, selectedDays, setModalState),
+                          _buildDayChip('Kam', 4, selectedDays, setModalState),
+                          _buildDayChip('Jum', 5, selectedDays, setModalState),
+                          _buildDayChip('Sab', 6, selectedDays, setModalState),
+                          _buildDayChip('Min', 7, selectedDays, setModalState),
+                        ],
+                      ),
+                    ],
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.indigo.shade700,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: () async {
+                          final newSched = GeofenceSchedule(
+                            geofenceId: geo.id,
+                            isEnabled: isEnabled,
+                            startHour: startTime.hour,
+                            startMinute: startTime.minute,
+                            endHour: endTime.hour,
+                            endMinute: endTime.minute,
+                            daysOfWeek: selectedDays.isEmpty ? const [1, 2, 3, 4, 5] : selectedDays,
+                          );
+                          await _scheduleService.saveSchedule(newSched);
+                          setState(() {
+                            _schedules[geo.id] = newSched;
+                          });
+                          if (mounted) {
+                            Navigator.pop(ctx);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  isEnabled
+                                      ? 'Jadwal cerdas ${geo.name} aktif: ${newSched.daysSummary} (${newSched.timeRangeString})'
+                                      : 'Jadwal cerdas dinonaktifkan (Zona aktif 24 jam)',
+                                ),
+                                backgroundColor: isEnabled ? Colors.indigo : Colors.grey.shade800,
+                              ),
+                            );
+                          }
+                        },
+                        child: const Text('Simpan Pengaturan Jadwal', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildDayChip(String label, int day, List<int> selectedDays, StateSetter setModalState) {
+    final isSelected = selectedDays.contains(day);
+    return FilterChip(
+      label: Text(label),
+      selected: isSelected,
+      selectedColor: Colors.indigo.shade100,
+      checkmarkColor: Colors.indigo.shade800,
+      labelStyle: TextStyle(
+        color: isSelected ? Colors.indigo.shade900 : Colors.black87,
+        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+        fontSize: 12,
+      ),
+      onSelected: (val) {
+        setModalState(() {
+          if (val) {
+            selectedDays.add(day);
+          } else {
+            selectedDays.remove(day);
+          }
+        });
+      },
+    );
   }
 
   Widget _buildGeofencesTab(CircleModel circle) {
@@ -915,27 +871,119 @@ class _CircleScreenState extends State<CircleScreen> with SingleTickerProviderSt
                 categoryLabel = 'Kantor';
               }
 
+                            final sched = _schedules[geo.id];
+              final isSchedEnabled = sched?.isEnabled ?? false;
+              final isCurrentlyActive = sched?.isCurrentlyActive(DateTime.now()) ?? true;
+
               return Card(
                 elevation: 0,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: BorderSide(color: Colors.grey.shade200),
+                  borderRadius: BorderRadius.circular(14),
+                  side: BorderSide(
+                    color: isSchedEnabled
+                        ? (isCurrentlyActive ? Colors.indigo.shade200 : Colors.amber.shade200)
+                        : Colors.grey.shade200,
+                    width: isSchedEnabled ? 1.5 : 1,
+                  ),
                 ),
-                margin: const EdgeInsets.only(bottom: 8),
-                child: ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: categoryColor.withValues(alpha: 0.15),
-                    child: Icon(categoryIcon, color: categoryColor),
-                  ),
-                  title: Text(geo.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                  subtitle: Text(
-                    'Kategori: $categoryLabel • Radius: ${geo.radiusMeters.toInt()}m',
-                    style: const TextStyle(fontSize: 12, color: Colors.black54),
-                  ),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
-                    tooltip: 'Hapus Zona',
-                    onPressed: () => _deleteGeofence(geo, circle),
+                margin: const EdgeInsets.only(bottom: 10),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Column(
+                    children: [
+                      ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: categoryColor.withOpacity(0.15),
+                          child: Icon(categoryIcon, color: categoryColor),
+                        ),
+                        title: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                geo.name,
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                              ),
+                            ),
+                            if (isSchedEnabled)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: isCurrentlyActive ? Colors.green.shade50 : Colors.grey.shade100,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: isCurrentlyActive ? Colors.green.shade300 : Colors.grey.shade400,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.circle,
+                                      size: 8,
+                                      color: isCurrentlyActive ? Colors.green : Colors.grey,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      isCurrentlyActive ? 'Aktif' : 'Di Luar Jam',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        color: isCurrentlyActive ? Colors.green.shade900 : Colors.grey.shade700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const SizedBox(height: 2),
+                            Text(
+                              'Kategori: $categoryLabel • Radius: ${geo.radiusMeters.toInt()}m',
+                              style: const TextStyle(fontSize: 12, color: Colors.black54),
+                            ),
+                            if (isSchedEnabled && sched != null) ...[
+                              const SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  Icon(Icons.schedule_rounded, size: 13, color: Colors.indigo.shade600),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    '${sched.daysSummary} (${sched.timeRangeString})',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.indigo.shade800,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ],
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: Icon(
+                                isSchedEnabled ? Icons.alarm_on_rounded : Icons.alarm_add_rounded,
+                                color: isSchedEnabled ? Colors.indigo : Colors.grey.shade600,
+                                size: 22,
+                              ),
+                              tooltip: 'Atur Jadwal Cerdas (S4)',
+                              onPressed: () => _showGeofenceScheduleDialog(geo),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                              tooltip: 'Hapus Zona',
+                              onPressed: () => _deleteGeofence(geo, circle),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               );
@@ -1004,4 +1052,83 @@ class _CircleScreenState extends State<CircleScreen> with SingleTickerProviderSt
       ),
     );
   }
+
+  Widget _buildInviteCodeCard(CircleModel circle) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 22),
+      decoration: BoxDecoration(
+        color: AppColors.primaryNavy,
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.primaryNavy.withOpacity(0.25),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: const [
+              Icon(Icons.groups_rounded, color: Colors.white70, size: 20),
+              SizedBox(width: 8),
+              Text(
+                'Kode Undangan Keluarga',
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            circle.inviteCode,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 30,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 3,
+            ),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: AppColors.primaryNavy,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
+              elevation: 0,
+            ),
+            icon: const Icon(Icons.copy_rounded, size: 16),
+            label: const Text(
+              'Salin Kode',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+              ),
+            ),
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: circle.inviteCode));
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  backgroundColor: AppColors.primaryNavy,
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  content: const Text('Kode undangan berhasil disalin!'),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
 }

@@ -6,6 +6,8 @@ import '../models/models.dart';
 import '../services/location_service.dart';
 import '../services/sos_trigger_service.dart';
 import '../services/supabase_service.dart';
+import '../services/fake_call_service.dart';
+import '../services/safety_timer_service.dart';
 import '../theme/app_theme.dart';
 
 class SosScreen extends StatefulWidget {
@@ -190,6 +192,116 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
       setState(() => _isHolding = false);
       _holdController.reset();
     }
+  }
+
+
+  Future<void> _showStartSafetyTimerSheet() async {
+    final safetyService = SafetyTimerService();
+    final descCtrl = TextEditingController(text: 'Perjalanan Darurat');
+    int selectedMinutes = 15;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setSheetState) => Padding(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: const [
+                  Icon(Icons.timer_outlined, color: Colors.teal, size: 24),
+                  SizedBox(width: 10),
+                  Text(
+                    'Safety Timer / Check-in (S6)',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Pasang timer sebelum berjalan di tempat rawan / naik taksi. Jika waktu habis tanpa Check-in, alarm bunyi & SOS otomatis dikirim.',
+                style: TextStyle(fontSize: 12, color: Colors.black54),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: descCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Deskripsi / Info Perjalanan',
+                  hintText: 'Misal: Pulang naik taksi plat nomor...',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [1, 15, 30, 45].map((m) {
+                  final isSel = selectedMinutes == m;
+                  return ChoiceChip(
+                    label: Text(m == 1 ? '1 Menit (Tes)' : '$m Mnt'),
+                    selected: isSel,
+                    selectedColor: Colors.teal.shade100,
+                    labelStyle: TextStyle(
+                      color: isSel ? Colors.teal.shade900 : Colors.black87,
+                      fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                    ),
+                    onSelected: (val) {
+                      if (val) setSheetState(() => selectedMinutes = m);
+                    },
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.teal,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  icon: const Icon(Icons.play_arrow_rounded),
+                  label: const Text('Mulai Safety Timer', style: TextStyle(fontWeight: FontWeight.bold)),
+                  onPressed: () {
+                    safetyService.startSafetyTimer(
+                      durationMinutes: selectedMinutes,
+                      description: descCtrl.text,
+                    );
+                    Navigator.pop(ctx);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Safety Timer aktif: $selectedMinutes menit.'),
+                        backgroundColor: Colors.teal,
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _triggerSOSDirectly() async {
@@ -538,6 +650,115 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
                                   style: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 13,
+                                    color: AppColors.textPrimary,
+                                    height: 1.2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              // BARIS KARTU FITUR S5 (Panggilan Palsu) & S6 (Safety Timer)
+              Row(
+                children: [
+                  // Kartu S5: Panggilan Palsu Darurat (Fake Emergency Call)
+                  Expanded(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: Colors.purple.shade200),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.purple.withOpacity(0.03),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(18),
+                          onTap: () {
+                            FakeCallService().launchCallNow(context);
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 12),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: const [
+                                Icon(
+                                  Icons.ring_volume_rounded,
+                                  color: Colors.deepPurple,
+                                  size: 28,
+                                ),
+                                SizedBox(height: 8),
+                                Text(
+                                  'Panggilan Palsu\n(Fake Call S5)',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12,
+                                    color: AppColors.textPrimary,
+                                    height: 1.2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+
+                  // Kartu S6: Safety Timer / Check-in Perjalanan
+                  Expanded(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: Colors.teal.shade200),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.teal.withOpacity(0.03),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(18),
+                          onTap: () {
+                            _showStartSafetyTimerSheet();
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 12),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: const [
+                                Icon(
+                                  Icons.timer_outlined,
+                                  color: Colors.teal,
+                                  size: 28,
+                                ),
+                                SizedBox(height: 8),
+                                Text(
+                                  'Safety Timer\n(Check-In S6)',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12,
                                     color: AppColors.textPrimary,
                                     height: 1.2,
                                   ),

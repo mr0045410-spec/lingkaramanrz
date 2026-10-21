@@ -13,10 +13,13 @@ import '../services/phone_protection_service.dart';
 import '../services/oem_security_service.dart';
 import '../services/sos_trigger_service.dart';
 import '../services/sound_settings_service.dart';
+import '../services/fall_detection_service.dart';
+import '../services/safety_timer_service.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../services/member_nickname_service.dart';
 import '../services/supabase_service.dart';
 import 'circle_screen.dart';
+import 'chat_screen.dart';
 import 'lost_mode_screen.dart';
 import 'map_view.dart';
 import 'profile_screen.dart';
@@ -38,6 +41,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final LoudSignalService _loudSignalService = LoudSignalService();
   final GeofenceService _geofenceService = GeofenceService();
   final PhoneProtectionService _phoneProtectionService = PhoneProtectionService();
+  final SafetyTimerService _safetyTimerService = SafetyTimerService();
+  StreamSubscription<int>? _safetyTimerSub;
 
   StreamSubscription<void>? _sosTriggerSub;
   StreamSubscription<LoudSignalModel>? _incomingSignalSub;
@@ -47,9 +52,122 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   StreamSubscription<LastBreathBeaconModel>? _lastBreathSub;
   StreamSubscription<bool>? _gpsStatusSub;
   StreamSubscription<LostModeCommand>? _lostModeSub;
+  StreamSubscription<void>? _fallSub;
+  bool _isFallDialogShowing = false;
   Timer? _alertRefreshTimer;
   bool _isLostModeScreenOpen = false;
   bool _isAccessibilityEnabled = true;
+  bool _dismissedAccessibilityBanner = false;
+
+  Future<void> _showFallEmergencyDialog() async {
+    if (_isFallDialogShowing || !mounted) return;
+    _isFallDialogShowing = true;
+
+    int secondsRemaining = 15;
+    Timer? countdownTimer;
+
+    await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            countdownTimer ??= Timer.periodic(const Duration(seconds: 1), (timer) {
+              if (secondsRemaining > 1) {
+                setDialogState(() {
+                  secondsRemaining--;
+                });
+              } else {
+                timer.cancel();
+                if (dialogCtx.mounted) {
+                  Navigator.of(dialogCtx).pop(true);
+                }
+              }
+            });
+
+            return AlertDialog(
+              backgroundColor: const Color(0xFF1E212B),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              title: Row(
+                children: const [
+                  Icon(Icons.warning_amber_rounded, color: Colors.orangeAccent, size: 28),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'BENTURAN / JATUH KERAS TERDETEKSI!',
+                      style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 10),
+                  Container(
+                    width: 80,
+                    height: 80,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.red.shade900.withValues(alpha: 0.3),
+                      border: Border.all(color: Colors.redAccent, width: 2),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      '$secondsRemaining',
+                      style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Ponsel mendeteksi guncangan/benturan keras. Mengirim sinyal SOS darurat ke keluarga jika tidak ada respons.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+                  ),
+                ],
+              ),
+              actions: [
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.teal,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    icon: const Icon(Icons.check_circle_outline),
+                    label: const Text(
+                      'SAYA BAIK-BAIK SAJA (BATAL)',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
+                    onPressed: () {
+                      countdownTimer?.cancel();
+                      Navigator.of(dialogCtx).pop(false);
+                    },
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    ).then((triggered) async {
+      countdownTimer?.cancel();
+      _isFallDialogShowing = false;
+      if (triggered == true && mounted) {
+        final pos = await _locService.getCurrentLocation();
+        await _supa.triggerSOS(
+          latitude: pos?.latitude ?? 0.0,
+          longitude: pos?.longitude ?? 0.0,
+          circleId: _selectedCircle?.id,
+          customMessage: '🚨 DARURAT OTOMATIS: Pengguna mengalami benturan/jatuh keras dan tidak merespons!',
+        );
+        _loadActiveAlerts();
+        setState(() => _currentIndex = 2);
+      }
+    });
+  }
 
   void _openLostModeScreen(LostModeCommand cmd) {
     if (_isLostModeScreenOpen || !mounted) return;
@@ -100,6 +218,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _chatChannels.clear();
     _gpsStatusSub?.cancel();
     _lostModeSub?.cancel();
+    _safetyTimerSub?.cancel();
+    _fallSub?.cancel();
     _alertRefreshTimer?.cancel();
     _openChatSub?.cancel();
     _audioService.stopListening();
@@ -201,12 +321,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     soundSettings.initChatNotificationListener();
     _openChatSub = soundSettings.onOpenChatTriggered.listen((_) {
       if (mounted) {
-        setState(() => _currentIndex = 1);
+        setState(() => _currentIndex = 2);
       }
     });
     soundSettings.getInitialOpenChatTrigger().then((triggered) {
       if (triggered && mounted) {
-        setState(() => _currentIndex = 1);
+        setState(() => _currentIndex = 2);
       }
     });
 
@@ -234,6 +354,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           setState(() => _currentIndex = 2);
         }
       });
+    });
+
+    _fallSub = FallDetectionService().onFallDetected.listen((_) {
+      if (mounted) {
+        _showFallEmergencyDialog();
+      }
     });
 
     // Start live location streaming & battery tracking (Foreground Service & Doze resistant)
@@ -715,13 +841,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           if (mounted) setState(() => _unreadChatCount++);
           final nickname = MemberNicknameService.instance.getNickname(msg.userId);
           final senderName = nickname ?? msg.senderProfile?.fullName ?? 'Anggota';
+          SoundSettingsService().previewSound('bubble_pop');
           await SoundSettingsService().showChatNotification(
             senderName: senderName,
             message: msg.message,
             circleName: circle.name,
           );
 
-          if (mounted && _currentIndex != 1) {
+          if (mounted && _currentIndex != 2) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 behavior: SnackBarBehavior.floating,
@@ -747,7 +874,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   onPressed: () {
                     setState(() {
                       _selectedCircle = circle;
-                      _currentIndex = 1;
+                      _currentIndex = 2;
+                      _unreadChatCount = 0;
                     });
                   },
                 ),
@@ -831,7 +959,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       body: Column(
         children: [
           // Accessibility Warning Banner if protection is not complete
-          if (!_isAccessibilityEnabled)
+          if (!_isAccessibilityEnabled && !_dismissedAccessibilityBanner)
             Material(
               color: Colors.amber.shade900,
               elevation: 3,
@@ -876,6 +1004,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
                         ),
                       ),
+                      const SizedBox(width: 4),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded, color: Colors.white70, size: 20),
+                        tooltip: 'Tutup Peringatan',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        onPressed: () {
+                          setState(() => _dismissedAccessibilityBanner = true);
+                        },
+                      ),
                     ],
                   ),
                 ),
@@ -890,7 +1028,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               child: SafeArea(
                 bottom: false,
                 child: InkWell(
-                  onTap: () => setState(() => _currentIndex = 2),
+                  onTap: () => setState(() => _currentIndex = 3),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
                     child: Row(
@@ -929,7 +1067,84 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
             ),
 
-          // Main Tab Pages (4 Tab Bersih: Peta, Lingkaran, SOS, Profil)
+          
+          // Banner Safety Timer (Fitur S6)
+          if (_safetyTimerService.isActive)
+            Material(
+              color: Colors.teal.shade800,
+              elevation: 4,
+              child: SafeArea(
+                top: false,
+                bottom: false,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: Colors.white24,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(Icons.timer_outlined, color: Colors.white, size: 18),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Safety Timer: ${_safetyTimerService.formattedRemaining}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                            ),
+                            Text(
+                              _safetyTimerService.tripDescription,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: Colors.white70, fontSize: 11),
+                            ),
+                          ],
+                        ),
+                      ),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: Colors.teal.shade900,
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          visualDensity: VisualDensity.compact,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        onPressed: () async {
+                          await _safetyTimerService.checkInSafe();
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('✅ Check-In Berhasil! Anda tiba dengan selamat.'),
+                                backgroundColor: Colors.teal,
+                              ),
+                            );
+                          }
+                        },
+                        child: const Text('CHECK-IN', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                      ),
+                      const SizedBox(width: 4),
+                      IconButton(
+                        icon: const Icon(Icons.close, color: Colors.white70, size: 18),
+                        visualDensity: VisualDensity.compact,
+                        tooltip: 'Batalkan Timer',
+                        onPressed: () => _safetyTimerService.stopTimer(),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+          // Main Tab Pages (5 Tab Mandiri: Peta, Lingkaran, Obrolan, SOS, Profil)
           Expanded(
             child: IndexedStack(
               index: _currentIndex,
@@ -956,6 +1171,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   },
                   onRefreshCircles: _loadCircles,
                 ),
+                ChatScreen(
+                  circles: _circles,
+                  selectedCircle: _selectedCircle,
+                  onCircleSelected: (c) {
+                    setState(() => _selectedCircle = c);
+                    _geofenceService.subscribeToCircleEvents(c.id);
+                    _loadActiveAlerts();
+                  },
+                ),
                 SosScreen(
                   selectedCircle: _selectedCircle,
                   activeAlerts: _activeAlerts,
@@ -976,7 +1200,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         onDestinationSelected: (idx) {
           setState(() {
             _currentIndex = idx;
-            if (idx == 1) _unreadChatCount = 0;
+            if (idx == 2) _unreadChatCount = 0;
           });
         },
         destinations: [
@@ -985,23 +1209,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             selectedIcon: Icon(Icons.location_on, color: Color(0xFF1E3A8A)),
             label: 'Peta',
           ),
-          NavigationDestination(
-            icon: Badge(
-              isLabelVisible: _unreadChatCount > 0,
-              label: Text(''),
-              child: const Icon(Icons.groups_outlined, color: Color(0xFF64748B)),
-            ),
-            selectedIcon: Badge(
-              isLabelVisible: _unreadChatCount > 0,
-              label: Text(''),
-              child: const Icon(Icons.groups_rounded, color: Color(0xFF1E3A8A)),
-            ),
+          const NavigationDestination(
+            icon: Icon(Icons.groups_outlined, color: Color(0xFF64748B)),
+            selectedIcon: Icon(Icons.groups_rounded, color: Color(0xFF1E3A8A)),
             label: 'Lingkaran',
           ),
           NavigationDestination(
             icon: Badge(
+              isLabelVisible: _unreadChatCount > 0,
+              label: Text('$_unreadChatCount'),
+              child: const Icon(Icons.chat_bubble_outline, color: Color(0xFF64748B)),
+            ),
+            selectedIcon: Badge(
+              isLabelVisible: _unreadChatCount > 0,
+              label: Text('$_unreadChatCount'),
+              child: const Icon(Icons.chat_bubble, color: Color(0xFF1E3A8A)),
+            ),
+            label: 'Obrolan',
+          ),
+          NavigationDestination(
+            icon: Badge(
               isLabelVisible: hasActiveSos,
-              label: Text(''),
+              label: const Text(''),
               child: const Icon(Icons.crisis_alert_outlined, color: Color(0xFF64748B)),
             ),
             selectedIcon: const Icon(Icons.crisis_alert, color: Color(0xFFDC2626)),

@@ -1,0 +1,8 @@
+# Template konfigurasi penandatanganan rilis APK (SEC-10 / B2)
+# Salin file ini menjadi key.properties di folder android/
+# PERINGATAN KEAMANAN: JANGAN PERNAH MENG-COMMIT key.properties ATAU FILE KEYSTORE (.jks) KE GIT!
+
+storePassword=ganti_dengan_password_keystore
+keyPassword=ganti_dengan_password_key
+keyAlias=lingkaraman_release_key
+storeFile=../lingkaraman_release.jks

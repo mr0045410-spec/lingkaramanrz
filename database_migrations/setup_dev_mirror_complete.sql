@@ -1,0 +1,940 @@
+-- =========================================================================
+-- SETUP DEV MIRROR COMPLETE (LINGKARAMAN)
+-- 1. Skema Penuh (migration_full.sql)
+-- 2. Ambient Audio Storage & Audio Requests (ambient_audio_schema.sql)
+-- 3. Security & RLS Hardening (migration_security_fixes.sql - A1, A2, A3)
+-- =========================================================================
+
+-- PART 1: SKEMA UTAMA
+-- ==========================================
+-- COMPLETE LINGKAR AMAN DATABASE MIGRATION
+-- Project: xtgumpluxciqesahpxuk (rezayasha's Project)
+-- ==========================================
+
+-- 1. Profiles Table
+CREATE TABLE IF NOT EXISTS public.profiles (
+    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    full_name TEXT NOT NULL,
+    phone_number TEXT,
+    avatar_url TEXT,
+    emergency_contact_phone TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Trigger auto-insert / update profile when auth.users is created
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    INSERT INTO public.profiles (id, full_name, phone_number, avatar_url)
+    VALUES (
+        NEW.id,
+        COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.raw_user_meta_data->>'name', split_part(NEW.email, '@', 1)),
+        COALESCE(NEW.raw_user_meta_data->>'phone', NEW.phone),
+        NEW.raw_user_meta_data->>'avatar_url'
+    )
+    ON CONFLICT (id) DO UPDATE SET
+        full_name = EXCLUDED.full_name,
+        phone_number = COALESCE(EXCLUDED.phone_number, public.profiles.phone_number),
+        avatar_url = COALESCE(EXCLUDED.avatar_url, public.profiles.avatar_url);
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+    AFTER INSERT ON auth.users
+    FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- 2. Circles Table
+CREATE TABLE IF NOT EXISTS public.circles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    invite_code VARCHAR(8) NOT NULL UNIQUE,
+    created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 3. Circle Members Table
+CREATE TABLE IF NOT EXISTS public.circle_members (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    circle_id UUID NOT NULL REFERENCES public.circles(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    role VARCHAR(20) NOT NULL DEFAULT 'member' CHECK (role IN ('admin', 'member')),
+    is_sharing_location BOOLEAN NOT NULL DEFAULT TRUE,
+    joined_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (circle_id, user_id)
+);
+
+-- 4. User Locations Table (Realtime)
+CREATE TABLE IF NOT EXISTS public.user_locations (
+    user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    latitude DOUBLE PRECISION NOT NULL,
+    longitude DOUBLE PRECISION NOT NULL,
+    battery_level INTEGER DEFAULT 100,
+    is_charging BOOLEAN DEFAULT FALSE,
+    speed DOUBLE PRECISION DEFAULT 0,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 5. SOS Alerts Table (Realtime)
+CREATE TABLE IF NOT EXISTS public.sos_alerts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    circle_id UUID REFERENCES public.circles(id) ON DELETE CASCADE,
+    latitude DOUBLE PRECISION NOT NULL,
+    longitude DOUBLE PRECISION NOT NULL,
+    message TEXT DEFAULT 'DARURAT! Saya membutuhkan bantuan segera.',
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'resolved', 'cancelled')),
+    triggered_at TIMESTAMPTZ DEFAULT NOW(),
+    resolved_at TIMESTAMPTZ
+);
+
+-- 6. Circle Messages Table (Chat/Komunitas Realtime)
+CREATE TABLE IF NOT EXISTS public.circle_messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    circle_id UUID NOT NULL REFERENCES public.circles(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    message TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 7. Loud Signals Table
+CREATE TABLE IF NOT EXISTS public.loud_signals (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    sender_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+    target_user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+    circle_id UUID REFERENCES public.circles(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    stopped_at TIMESTAMPTZ
+);
+
+-- 8. App Usage Reports (Screen Time)
+CREATE TABLE IF NOT EXISTS public.app_usage_reports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+    package_name TEXT NOT NULL,
+    app_name TEXT NOT NULL,
+    total_time_foreground_seconds INTEGER NOT NULL DEFAULT 0,
+    last_time_used TIMESTAMPTZ,
+    report_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT unique_user_package_date UNIQUE(user_id, package_name, report_date)
+);
+
+-- 9. Geofences Table
+CREATE TABLE IF NOT EXISTS public.geofences (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    circle_id UUID REFERENCES public.circles(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    category TEXT NOT NULL DEFAULT 'home',
+    latitude DOUBLE PRECISION NOT NULL,
+    longitude DOUBLE PRECISION NOT NULL,
+    radius_meters DOUBLE PRECISION NOT NULL DEFAULT 150.0,
+    created_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 10. Geofence Events Table
+CREATE TABLE IF NOT EXISTS public.geofence_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    circle_id UUID REFERENCES public.circles(id) ON DELETE CASCADE,
+    geofence_id UUID REFERENCES public.geofences(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+    event_type TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 11. Audio Requests Table (Ambient Audio)
+CREATE TABLE IF NOT EXISTS public.audio_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    circle_id UUID REFERENCES public.circles(id) ON DELETE CASCADE,
+    requester_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    target_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'recording', 'completed', 'failed')),
+    audio_url TEXT,
+    duration_seconds INTEGER NOT NULL DEFAULT 15,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    completed_at TIMESTAMPTZ
+);
+
+-- Helper functions
+CREATE OR REPLACE FUNCTION public.is_member_of(p_circle_id UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    RETURN EXISTS (
+        SELECT 1 FROM public.circle_members
+        WHERE circle_id = p_circle_id AND user_id = auth.uid()
+    );
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.join_circle_by_code(p_code TEXT)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_circle_id UUID;
+BEGIN
+    SELECT id INTO v_circle_id FROM public.circles WHERE UPPER(invite_code) = UPPER(p_code);
+    IF v_circle_id IS NULL THEN
+        RAISE EXCEPTION 'Kode invite lingkaran tidak ditemukan';
+    END IF;
+
+    INSERT INTO public.circle_members (circle_id, user_id, role)
+    VALUES (v_circle_id, auth.uid(), 'member')
+    ON CONFLICT (circle_id, user_id) DO NOTHING;
+
+    RETURN v_circle_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.is_co_member_with(p_user_id UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    IF p_user_id = auth.uid() THEN
+        RETURN TRUE;
+    END IF;
+    RETURN EXISTS (
+        SELECT 1 FROM public.circle_members cm1
+        JOIN public.circle_members cm2 ON cm1.circle_id = cm2.circle_id
+        WHERE cm1.user_id = auth.uid() AND cm2.user_id = p_user_id
+    );
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.normalize_circle_roles(p_circle_id UUID)
+RETURNS INTEGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_updated_count INTEGER;
+BEGIN
+    -- Otorisasi: Pemanggil harus creator circle ATAU admin di circle tersebut
+    IF auth.uid() IS NULL THEN
+        RAISE EXCEPTION 'unauthorized';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM public.circles c
+        WHERE c.id = p_circle_id
+          AND (
+            c.created_by = auth.uid()
+            OR EXISTS (
+                SELECT 1 FROM public.circle_members cm
+                WHERE cm.circle_id = p_circle_id
+                  AND cm.user_id = auth.uid()
+                  AND cm.role = 'admin'
+            )
+          )
+    ) THEN
+        RAISE EXCEPTION 'unauthorized';
+    END IF;
+
+    UPDATE public.circle_members cm
+    SET role = 'member'
+    FROM public.circles c
+    WHERE cm.circle_id = p_circle_id
+      AND c.id = cm.circle_id
+      AND cm.role = 'admin'
+      AND (c.created_by IS NULL OR cm.user_id != c.created_by);
+      
+    GET DIAGNOSTICS v_updated_count = ROW_COUNT;
+    RETURN v_updated_count;
+END;
+$$;
+
+-- 12. Location History Table
+CREATE TABLE IF NOT EXISTS public.location_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    latitude DOUBLE PRECISION NOT NULL,
+    longitude DOUBLE PRECISION NOT NULL,
+    speed DOUBLE PRECISION DEFAULT 0.0,
+    battery_level INTEGER DEFAULT 100,
+    recorded_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_location_history_user_time 
+ON public.location_history (user_id, recorded_at DESC);
+
+-- 13. Remote Commands Table (Lost Mode, Fake Shutdown, Remote Wipe)
+CREATE TABLE IF NOT EXISTS public.remote_commands (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    circle_id UUID REFERENCES public.circles(id) ON DELETE CASCADE,
+    sender_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    target_user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    command_type VARCHAR(30) NOT NULL, -- 'lost_mode_on', 'lost_mode_off', 'fake_shutdown', 'remote_wipe'
+    status VARCHAR(20) NOT NULL DEFAULT 'pending', -- 'pending', 'executed', 'cancelled'
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    executed_at TIMESTAMPTZ
+);
+
+-- 14. User Devices Table (FCM Push Notifications & Wakeup)
+CREATE TABLE IF NOT EXISTS public.user_devices (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    fcm_token TEXT NOT NULL,
+    platform TEXT NOT NULL DEFAULT 'android',
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT user_devices_user_fcm_unique UNIQUE (user_id, fcm_token)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_devices_user_id ON public.user_devices(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_devices_fcm_token ON public.user_devices(fcm_token);
+
+-- Enable RLS
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.circles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.circle_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_locations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sos_alerts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.circle_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.loud_signals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.app_usage_reports ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.geofences ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.geofence_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.audio_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.location_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.remote_commands ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_devices ENABLE ROW LEVEL SECURITY;
+
+-- Policies for Profiles
+DROP POLICY IF EXISTS "Profiles are readable by authenticated users" ON public.profiles;
+DROP POLICY IF EXISTS "Profiles readable by self or circle co-members" ON public.profiles;
+CREATE POLICY "Profiles readable by self or circle co-members" ON public.profiles FOR SELECT TO authenticated USING (auth.uid() = id OR is_co_member_with(id));
+DROP POLICY IF EXISTS "Users can insert own profile" ON public.profiles;
+CREATE POLICY "Users can insert own profile" ON public.profiles FOR INSERT TO authenticated WITH CHECK (auth.uid() = id);
+DROP POLICY IF EXISTS "Users can update own profile" ON public.profiles;
+CREATE POLICY "Users can update own profile" ON public.profiles FOR ALL TO authenticated USING (auth.uid() = id) WITH CHECK (auth.uid() = id);
+
+-- Policies for Circles (SELECT remains open so users can preview invite codes)
+DROP POLICY IF EXISTS "Authenticated users can view circles" ON public.circles;
+CREATE POLICY "Authenticated users can view circles" ON public.circles FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "Users can create circles" ON public.circles;
+CREATE POLICY "Users can create circles" ON public.circles FOR INSERT TO authenticated WITH CHECK (auth.uid() = created_by);
+
+-- Policies for Circle Members
+DROP POLICY IF EXISTS "Members can view circle members" ON public.circle_members;
+CREATE POLICY "Members can view circle members" ON public.circle_members FOR SELECT TO authenticated USING (is_member_of(circle_id));
+DROP POLICY IF EXISTS "Users can join circles" ON public.circle_members;
+CREATE POLICY "Users can join circles" ON public.circle_members FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Admins or self can update circle members" ON public.circle_members;
+CREATE POLICY "Admins or self can update circle members" ON public.circle_members FOR UPDATE TO authenticated USING (auth.uid() = user_id OR EXISTS (SELECT 1 FROM public.circles WHERE id = circle_members.circle_id AND created_by = auth.uid()));
+
+-- Policies for Locations
+DROP POLICY IF EXISTS "Locations readable by circle co-members" ON public.user_locations;
+CREATE POLICY "Locations readable by circle co-members" ON public.user_locations FOR SELECT TO authenticated USING (user_id = auth.uid() OR is_co_member_with(user_id));
+DROP POLICY IF EXISTS "Users can upsert own location" ON public.user_locations;
+CREATE POLICY "Users can upsert own location" ON public.user_locations FOR ALL TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+-- Policies for SOS Alerts
+DROP POLICY IF EXISTS "SOS alerts readable by circle members" ON public.sos_alerts;
+CREATE POLICY "SOS alerts readable by circle members" ON public.sos_alerts FOR SELECT TO authenticated USING (user_id = auth.uid() OR (circle_id IS NOT NULL AND is_member_of(circle_id)));
+DROP POLICY IF EXISTS "Users can create SOS alerts" ON public.sos_alerts;
+CREATE POLICY "Users can create SOS alerts" ON public.sos_alerts FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can update SOS alerts" ON public.sos_alerts;
+DROP POLICY IF EXISTS "Users can update own or circle SOS alerts" ON public.sos_alerts;
+CREATE POLICY "Users can update own or circle SOS alerts" ON public.sos_alerts FOR UPDATE TO authenticated USING (user_id = auth.uid() OR (circle_id IS NOT NULL AND is_member_of(circle_id)) OR message LIKE '%Target: ' || auth.uid() || '%') WITH CHECK (user_id = auth.uid() OR (circle_id IS NOT NULL AND is_member_of(circle_id)) OR message LIKE '%Target: ' || auth.uid() || '%');
+
+-- Policies for Messages
+DROP POLICY IF EXISTS "Circle members can read messages" ON public.circle_messages;
+CREATE POLICY "Circle members can read messages" ON public.circle_messages FOR SELECT TO authenticated USING (is_member_of(circle_id));
+DROP POLICY IF EXISTS "Circle members can post messages" ON public.circle_messages;
+CREATE POLICY "Circle members can post messages" ON public.circle_messages FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id AND is_member_of(circle_id));
+
+-- Policies for Loud Signals (SECURED, NO ANON)
+DROP POLICY IF EXISTS "Allow authenticated read/write loud_signals" ON public.loud_signals;
+DROP POLICY IF EXISTS "Allow anon read/write loud_signals" ON public.loud_signals;
+DROP POLICY IF EXISTS "Members can view loud signals" ON public.loud_signals;
+CREATE POLICY "Members can view loud signals" ON public.loud_signals FOR SELECT TO authenticated USING (sender_id = auth.uid() OR target_user_id = auth.uid() OR (circle_id IS NOT NULL AND is_member_of(circle_id)));
+DROP POLICY IF EXISTS "Members can send loud signals" ON public.loud_signals;
+CREATE POLICY "Members can send loud signals" ON public.loud_signals FOR INSERT TO authenticated WITH CHECK (sender_id = auth.uid() AND (circle_id IS NULL OR is_member_of(circle_id)));
+DROP POLICY IF EXISTS "Target or sender can update loud signals" ON public.loud_signals;
+CREATE POLICY "Target or sender can update loud signals" ON public.loud_signals FOR UPDATE TO authenticated USING (sender_id = auth.uid() OR target_user_id = auth.uid()) WITH CHECK (sender_id = auth.uid() OR target_user_id = auth.uid());
+
+-- Policies for App Usage Reports (SECURED, NO ANON)
+DROP POLICY IF EXISTS "Allow authenticated read/write app_usage_reports" ON public.app_usage_reports;
+DROP POLICY IF EXISTS "Allow anon read/write app_usage_reports" ON public.app_usage_reports;
+DROP POLICY IF EXISTS "Users and co-members can view app usage" ON public.app_usage_reports;
+CREATE POLICY "Users and co-members can view app usage" ON public.app_usage_reports FOR SELECT TO authenticated USING (user_id = auth.uid() OR is_co_member_with(user_id));
+DROP POLICY IF EXISTS "Users can insert own app usage" ON public.app_usage_reports;
+CREATE POLICY "Users can insert own app usage" ON public.app_usage_reports FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can update own app usage" ON public.app_usage_reports;
+CREATE POLICY "Users can update own app usage" ON public.app_usage_reports FOR UPDATE TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+-- Policies for Geofences (SECURED, NO ANON)
+DROP POLICY IF EXISTS "Allow authenticated read/write geofences" ON public.geofences;
+DROP POLICY IF EXISTS "Allow anon read/write geofences" ON public.geofences;
+DROP POLICY IF EXISTS "Members can view geofences" ON public.geofences;
+CREATE POLICY "Members can view geofences" ON public.geofences FOR SELECT TO authenticated USING (is_member_of(circle_id));
+DROP POLICY IF EXISTS "Members can create geofences" ON public.geofences;
+CREATE POLICY "Members can create geofences" ON public.geofences FOR INSERT TO authenticated WITH CHECK (is_member_of(circle_id));
+DROP POLICY IF EXISTS "Members can update geofences" ON public.geofences;
+CREATE POLICY "Members can update geofences" ON public.geofences FOR UPDATE TO authenticated USING (is_member_of(circle_id));
+DROP POLICY IF EXISTS "Members can delete geofences" ON public.geofences;
+CREATE POLICY "Members can delete geofences" ON public.geofences FOR DELETE TO authenticated USING (is_member_of(circle_id));
+
+-- Policies for Geofence Events (SECURED, NO ANON)
+DROP POLICY IF EXISTS "Allow authenticated read/write geofence_events" ON public.geofence_events;
+DROP POLICY IF EXISTS "Allow anon read/write geofence_events" ON public.geofence_events;
+DROP POLICY IF EXISTS "Members can view geofence events" ON public.geofence_events;
+CREATE POLICY "Members can view geofence events" ON public.geofence_events FOR SELECT TO authenticated USING (is_member_of(circle_id));
+DROP POLICY IF EXISTS "Members can insert geofence events" ON public.geofence_events;
+CREATE POLICY "Members can insert geofence events" ON public.geofence_events FOR INSERT TO authenticated WITH CHECK (is_member_of(circle_id));
+
+-- Policies for Audio Requests
+DROP POLICY IF EXISTS "Members can view audio requests for their circles" ON public.audio_requests;
+CREATE POLICY "Members can view audio requests for their circles" ON public.audio_requests FOR SELECT TO authenticated USING (requester_id = auth.uid() OR target_id = auth.uid() OR (circle_id IS NOT NULL AND is_member_of(circle_id)));
+DROP POLICY IF EXISTS "Members can create audio requests" ON public.audio_requests;
+CREATE POLICY "Members can create audio requests" ON public.audio_requests FOR INSERT TO authenticated WITH CHECK (requester_id = auth.uid() AND (circle_id IS NULL OR is_member_of(circle_id)));
+DROP POLICY IF EXISTS "Target or requester can update audio requests" ON public.audio_requests;
+CREATE POLICY "Target or requester can update audio requests" ON public.audio_requests FOR UPDATE TO authenticated USING (requester_id = auth.uid() OR target_id = auth.uid()) WITH CHECK (requester_id = auth.uid() OR target_id = auth.uid());
+
+-- Policies for Location History
+DROP POLICY IF EXISTS "Users can insert own location history" ON public.location_history;
+CREATE POLICY "Users can insert own location history" ON public.location_history FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Location history readable by co-members" ON public.location_history;
+CREATE POLICY "Location history readable by co-members" ON public.location_history FOR SELECT TO authenticated USING (user_id = auth.uid() OR is_co_member_with(user_id));
+
+-- Policies for Remote Commands
+DROP POLICY IF EXISTS "Circle members can manage remote commands" ON public.remote_commands;
+CREATE POLICY "Circle members can manage remote commands"
+ON public.remote_commands FOR ALL TO authenticated
+USING (
+    sender_id = auth.uid()
+    OR target_user_id = auth.uid()
+    OR (circle_id IS NOT NULL AND public.is_member_of(circle_id))
+)
+WITH CHECK (
+    sender_id = auth.uid()
+    OR target_user_id = auth.uid()
+    OR (circle_id IS NOT NULL AND public.is_member_of(circle_id))
+);
+
+-- Policies for User Devices (FCM Push Tokens)
+DROP POLICY IF EXISTS "Users can manage own devices" ON public.user_devices;
+CREATE POLICY "Users can manage own devices"
+    ON public.user_devices
+    FOR ALL
+    TO authenticated
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Circle members can read circle members devices" ON public.user_devices;
+CREATE POLICY "Circle members can read circle members devices"
+    ON public.user_devices
+    FOR SELECT
+    TO authenticated
+    USING (
+        auth.uid() = user_id
+        OR is_co_member_with(user_id)
+    );
+
+-- RPC Function to safely resolve Lost Mode across tables (SECURITY DEFINER)
+CREATE OR REPLACE FUNCTION public.resolve_lost_mode(p_target_user_id UUID)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    -- Otorisasi: Hanya target sendiri ATAU rekan se-circle yang boleh resolve
+    IF auth.uid() IS NULL OR (auth.uid() != p_target_user_id AND NOT public.is_co_member_with(p_target_user_id)) THEN
+        RAISE EXCEPTION 'unauthorized';
+    END IF;
+
+    -- 1. Tandai SOS alerts terkait mode hilang target ini sebagai resolved
+    UPDATE public.sos_alerts
+    SET status = 'resolved',
+        resolved_at = NOW()
+    WHERE status = 'active'
+      AND message LIKE '%[MODE HP HILANG]%'
+      AND message LIKE '%Target: ' || p_target_user_id || '%';
+
+    -- 2. Tandai remote_commands pending sebagai executed
+    UPDATE public.remote_commands
+    SET status = 'executed',
+        executed_at = NOW()
+    WHERE target_user_id = p_target_user_id
+      AND status = 'pending'
+      AND command_type IN ('lost_mode_on', 'fake_shutdown');
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.resolve_lost_mode(UUID) TO authenticated;
+
+-- Realtime Setup
+DO $$
+BEGIN
+    ALTER TABLE public.sos_alerts REPLICA IDENTITY FULL;
+    ALTER TABLE public.remote_commands REPLICA IDENTITY FULL;
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.user_locations;
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.sos_alerts;
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.circle_messages;
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.loud_signals;
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.geofence_events;
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.audio_requests;
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.remote_commands;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+-- Storage Bucket for Ambient Audio
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('ambient_audio', 'ambient_audio', true)
+ON CONFLICT (id) DO NOTHING;
+
+DROP POLICY IF EXISTS "Authenticated users can upload audio" ON storage.objects;
+CREATE POLICY "Authenticated users can upload audio" ON storage.objects FOR INSERT TO authenticated WITH CHECK (bucket_id = 'ambient_audio');
+
+DROP POLICY IF EXISTS "Authenticated users can read audio" ON storage.objects;
+CREATE POLICY "Authenticated users can read audio" ON storage.objects FOR SELECT TO authenticated USING (bucket_id = 'ambient_audio');
+
+-- Reload Schema Cache
+NOTIFY pgrst, 'reload schema';
+
+
+
+-- PART 2: AMBIENT AUDIO & AUDIO REQUESTS
+-- 1. Create Storage Bucket for Ambient Audio
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('ambient_audio', 'ambient_audio', true)
+ON CONFLICT (id) DO NOTHING;
+
+-- Storage Policy: Authenticated users can upload and read audio clips
+DROP POLICY IF EXISTS "Authenticated users can upload audio" ON storage.objects;
+CREATE POLICY "Authenticated users can upload audio" ON storage.objects
+    FOR INSERT TO authenticated WITH CHECK (bucket_id = 'ambient_audio');
+
+DROP POLICY IF EXISTS "Authenticated users can read audio" ON storage.objects;
+CREATE POLICY "Authenticated users can read audio" ON storage.objects
+    FOR SELECT TO authenticated USING (bucket_id = 'ambient_audio');
+
+-- 2. Create audio_requests Table
+CREATE TABLE IF NOT EXISTS public.audio_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    circle_id UUID REFERENCES public.circles(id) ON DELETE CASCADE,
+    requester_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    target_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'recording', 'completed', 'failed')),
+    audio_url TEXT,
+    duration_seconds INTEGER NOT NULL DEFAULT 15,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    completed_at TIMESTAMPTZ
+);
+
+-- Enable RLS on audio_requests
+ALTER TABLE public.audio_requests ENABLE ROW LEVEL SECURITY;
+
+-- Policies for audio_requests
+DROP POLICY IF EXISTS "Members can view audio requests for their circles" ON public.audio_requests;
+CREATE POLICY "Members can view audio requests for their circles" ON public.audio_requests
+    FOR SELECT TO authenticated USING (
+        requester_id = auth.uid() OR target_id = auth.uid() OR public.is_member_of(circle_id)
+    );
+
+DROP POLICY IF EXISTS "Members can create audio requests" ON public.audio_requests;
+CREATE POLICY "Members can create audio requests" ON public.audio_requests
+    FOR INSERT TO authenticated WITH CHECK (requester_id = auth.uid());
+
+DROP POLICY IF EXISTS "Target or requester can update audio requests" ON public.audio_requests;
+CREATE POLICY "Target or requester can update audio requests" ON public.audio_requests
+    FOR UPDATE TO authenticated USING (
+        target_id = auth.uid() OR requester_id = auth.uid()
+    );
+
+-- Add to Realtime Publication
+DO $$
+BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.audio_requests;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+
+-- PART 3: PERBAIKAN KEAMANAN & RLS HARDENING (REVISI A1, A2, A3)
+-- ====================================================================
+-- SKRIP MIGRASI PERBAIKAN KEAMANAN & PRIVASI LINGKARAMAN (REVISI TAHAP 2)
+-- Berkas: migration_security_fixes.sql
+-- Status: Proposal Terevisi untuk Ditinjau (Review Before Apply)
+-- Target Instance: uwxecnbeqeysnlzwdcha (dan mirror lingkungan dev)
+-- ====================================================================
+
+-- --------------------------------------------------------------------
+-- 1. PERBAIKAN SEC-01: Mengunci Tabel Circles (Cegah Pencurian Invite Code)
+-- --------------------------------------------------------------------
+-- Menutup SELECT terbuka (USING true).
+-- Hanya pembuat lingkaran atau anggota aktif yang dapat melihat data lingkaran.
+DROP POLICY IF EXISTS "Authenticated users can view circles" ON public.circles;
+DROP POLICY IF EXISTS "Members or creators can view circles" ON public.circles;
+
+CREATE POLICY "Members or creators can view circles" ON public.circles 
+    FOR SELECT TO authenticated 
+    USING (
+        created_by = auth.uid() 
+        OR public.is_member_of(id)
+    );
+
+-- --------------------------------------------------------------------
+-- 2. PERBAIKAN SEC-03: Mencegah Eskalasi Peran pada circle_members (A2)
+-- --------------------------------------------------------------------
+-- Pengguna biasa TIDAK BOLEH bisa mengangkat dirinya sendiri menjadi admin.
+-- User biasa hanya boleh mengubah is_sharing_location miliknya sendiri.
+DROP POLICY IF EXISTS "Admins or self can update circle members" ON public.circle_members;
+DROP POLICY IF EXISTS "Members can update own location sharing" ON public.circle_members;
+DROP POLICY IF EXISTS "Admins or creators can update circle members" ON public.circle_members;
+DROP POLICY IF EXISTS "Users can leave or admins can remove members" ON public.circle_members;
+
+-- 2a. Anggota biasa hanya boleh memperbarui status berbagi lokasi miliknya
+CREATE POLICY "Members can update own location sharing" ON public.circle_members
+    FOR UPDATE TO authenticated
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id AND role = 'member');
+
+-- 2b. Hanya creator circle atau admin yang berhak mengubah role atau status anggota lain
+-- Catatan Revisi A2: Menambahkan WITH CHECK eksplisit (mirror dari USING)
+CREATE POLICY "Admins or creators can update circle members" ON public.circle_members
+    FOR UPDATE TO authenticated
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.circles c
+            WHERE c.id = circle_members.circle_id
+              AND (
+                  c.created_by = auth.uid()
+                  OR EXISTS (
+                      SELECT 1 FROM public.circle_members cm
+                      WHERE cm.circle_id = circle_members.circle_id
+                        AND cm.user_id = auth.uid()
+                        AND cm.role = 'admin'
+                  )
+              )
+        )
+    )
+    WITH CHECK (
+        EXISTS (
+            SELECT 1 FROM public.circles c
+            WHERE c.id = circle_members.circle_id
+              AND (
+                  c.created_by = auth.uid()
+                  OR EXISTS (
+                      SELECT 1 FROM public.circle_members cm
+                      WHERE cm.circle_id = circle_members.circle_id
+                        AND cm.user_id = auth.uid()
+                        AND cm.role = 'admin'
+                  )
+              )
+        )
+    );
+
+-- 2c. Tambahkan hak DELETE: Memungkinkan user keluar lingkaran atau admin mengeluarkan member
+CREATE POLICY "Users can leave or admins can remove members" ON public.circle_members
+    FOR DELETE TO authenticated
+    USING (
+        auth.uid() = user_id
+        OR EXISTS (
+            SELECT 1 FROM public.circles c
+            WHERE c.id = circle_members.circle_id
+              AND (
+                  c.created_by = auth.uid()
+                  OR EXISTS (
+                      SELECT 1 FROM public.circle_members cm
+                      WHERE cm.circle_id = circle_members.circle_id
+                        AND cm.user_id = auth.uid()
+                        AND cm.role = 'admin'
+                  )
+              )
+        )
+    );
+
+-- --------------------------------------------------------------------
+-- 3. PERBAIKAN SEC-04: Menghormati Sakelar is_sharing_location
+-- --------------------------------------------------------------------
+-- Fungsi terpusat untuk memvalidasi hak melihat lokasi target
+CREATE OR REPLACE FUNCTION public.can_view_location_of(p_user_id UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    -- Lokasi milik sendiri selalu boleh dilihat
+    IF p_user_id = auth.uid() THEN
+        RETURN TRUE;
+    END IF;
+
+    -- Pengecualian darurat: Jika target sedang dalam status SOS aktif, lokasi selalu diizinkan
+    IF EXISTS (
+        SELECT 1 FROM public.sos_alerts 
+        WHERE user_id = p_user_id AND status = 'active'
+    ) THEN
+        RETURN TRUE;
+    END IF;
+
+    -- Pengguna hanya boleh melihat lokasi jika berada dalam lingkaran yang sama
+    -- DAN target secara sukarela mengaktifkan is_sharing_location = TRUE
+    RETURN EXISTS (
+        SELECT 1 FROM public.circle_members cm_viewer
+        JOIN public.circle_members cm_target ON cm_viewer.circle_id = cm_target.circle_id
+        WHERE cm_viewer.user_id = auth.uid() 
+          AND cm_target.user_id = p_user_id
+          AND cm_target.is_sharing_location = TRUE
+    );
+END;
+$$;
+
+-- Terapkan ke tabel user_locations
+DROP POLICY IF EXISTS "Locations readable by circle co-members" ON public.user_locations;
+DROP POLICY IF EXISTS "Locations readable by authorized co-members" ON public.user_locations;
+
+CREATE POLICY "Locations readable by authorized co-members" ON public.user_locations
+    FOR SELECT TO authenticated
+    USING (public.can_view_location_of(user_id));
+
+-- Terapkan ke tabel location_history
+DROP POLICY IF EXISTS "Location history readable by co-members" ON public.location_history;
+DROP POLICY IF EXISTS "Location history readable by authorized co-members" ON public.location_history;
+
+CREATE POLICY "Location history readable by authorized co-members" ON public.location_history
+    FOR SELECT TO authenticated
+    USING (public.can_view_location_of(user_id));
+
+-- Izinkan pengguna menghapus riwayat lokasinya sendiri (Hak Privasi / GDPR)
+DROP POLICY IF EXISTS "Users can delete own location history" ON public.location_history;
+CREATE POLICY "Users can delete own location history" ON public.location_history
+    FOR DELETE TO authenticated
+    USING (auth.uid() = user_id);
+
+-- --------------------------------------------------------------------
+-- 4. PERBAIKAN SEC-05: Mengunci remote_commands dari Injeksi Sembarangan
+-- --------------------------------------------------------------------
+DROP POLICY IF EXISTS "Circle members can manage remote commands" ON public.remote_commands;
+DROP POLICY IF EXISTS "Users can view relevant remote commands" ON public.remote_commands;
+DROP POLICY IF EXISTS "Authorized members can send remote commands" ON public.remote_commands;
+DROP POLICY IF EXISTS "Target can update status of remote commands" ON public.remote_commands;
+
+CREATE POLICY "Users can view relevant remote commands" ON public.remote_commands
+    FOR SELECT TO authenticated
+    USING (
+        sender_id = auth.uid()
+        OR target_user_id = auth.uid()
+        OR (circle_id IS NOT NULL AND public.is_member_of(circle_id))
+    );
+
+CREATE POLICY "Authorized members can send remote commands" ON public.remote_commands
+    FOR INSERT TO authenticated
+    WITH CHECK (
+        sender_id = auth.uid()
+        AND circle_id IS NOT NULL
+        AND public.is_member_of(circle_id)
+        AND (
+            -- Perintah penguncian untuk diri sendiri
+            target_user_id = auth.uid()
+            -- ATAU dikirim oleh creator/admin lingkaran kepada anggota lingkaran yang sama
+            OR EXISTS (
+                SELECT 1 FROM public.circles c
+                WHERE c.id = remote_commands.circle_id
+                  AND (
+                      c.created_by = auth.uid()
+                      OR EXISTS (
+                          SELECT 1 FROM public.circle_members cm
+                          WHERE cm.circle_id = remote_commands.circle_id
+                            AND cm.user_id = auth.uid()
+                            AND cm.role = 'admin'
+                      )
+                  )
+            )
+        )
+        AND EXISTS (
+            SELECT 1 FROM public.circle_members cm_target
+            WHERE cm_target.circle_id = remote_commands.circle_id
+              AND cm_target.user_id = remote_commands.target_user_id
+        )
+    );
+
+CREATE POLICY "Target can update status of remote commands" ON public.remote_commands
+    FOR UPDATE TO authenticated
+    USING (target_user_id = auth.uid() OR sender_id = auth.uid())
+    WITH CHECK (target_user_id = auth.uid() OR sender_id = auth.uid());
+
+-- --------------------------------------------------------------------
+-- 5. PERBAIKAN SEC-06: Mencegah Sinyal Keras & Sadap Audio Lintas Lingkaran
+-- --------------------------------------------------------------------
+-- Hapus klausa 'circle_id IS NULL'
+DROP POLICY IF EXISTS "Members can send loud signals" ON public.loud_signals;
+CREATE POLICY "Members can send loud signals" ON public.loud_signals 
+    FOR INSERT TO authenticated 
+    WITH CHECK (
+        sender_id = auth.uid() 
+        AND circle_id IS NOT NULL 
+        AND public.is_member_of(circle_id)
+        AND EXISTS (
+            SELECT 1 FROM public.circle_members cm
+            WHERE cm.circle_id = loud_signals.circle_id
+              AND cm.user_id = loud_signals.target_user_id
+        )
+    );
+
+DROP POLICY IF EXISTS "Members can create audio requests" ON public.audio_requests;
+CREATE POLICY "Members can create audio requests" ON public.audio_requests 
+    FOR INSERT TO authenticated 
+    WITH CHECK (
+        requester_id = auth.uid() 
+        AND circle_id IS NOT NULL 
+        AND public.is_member_of(circle_id)
+        AND EXISTS (
+            SELECT 1 FROM public.circle_members cm
+            WHERE cm.circle_id = audio_requests.circle_id
+              AND cm.user_id = audio_requests.target_id
+        )
+    );
+
+-- --------------------------------------------------------------------
+-- 6. PERBAIKAN SEC-07: Batasi DELETE Geofences Hanya untuk Admin/Creator
+-- --------------------------------------------------------------------
+DROP POLICY IF EXISTS "Members can delete geofences" ON public.geofences;
+DROP POLICY IF EXISTS "Admins or creators can delete geofences" ON public.geofences;
+
+CREATE POLICY "Admins or creators can delete geofences" ON public.geofences 
+    FOR DELETE TO authenticated 
+    USING (
+        created_by = auth.uid()
+        OR EXISTS (
+            SELECT 1 FROM public.circles c
+            WHERE c.id = geofences.circle_id
+              AND (
+                  c.created_by = auth.uid()
+                  OR EXISTS (
+                      SELECT 1 FROM public.circle_members cm
+                      WHERE cm.circle_id = geofences.circle_id
+                        AND cm.user_id = auth.uid()
+                        AND cm.role = 'admin'
+                  )
+              )
+        )
+    );
+
+-- --------------------------------------------------------------------
+-- 7. PERBAIKAN SEC-02 & REVISI A1: Mengunci Storage Bucket ambient_audio
+-- --------------------------------------------------------------------
+UPDATE storage.buckets 
+SET public = false 
+WHERE id = 'ambient_audio';
+
+DROP POLICY IF EXISTS "Authenticated users can upload audio" ON storage.objects;
+DROP POLICY IF EXISTS "Authenticated users can read audio" ON storage.objects;
+DROP POLICY IF EXISTS "Users can upload to own storage folder" ON storage.objects;
+DROP POLICY IF EXISTS "Authorized users can read storage objects" ON storage.objects;
+
+-- Upload dibatasi hanya ke folder ID masing-masing: <user_id>/...
+CREATE POLICY "Users can upload to own storage folder" ON storage.objects
+    FOR INSERT TO authenticated
+    WITH CHECK (
+        bucket_id = 'ambient_audio'
+        AND (storage.foldername(name))[1] = auth.uid()::text
+    );
+
+-- Catatan Revisi A1: Menambahkan guard regex UUID sebelum casting ::uuid
+-- Mencegah query crash pada file legacy dengan prefix non-UUID seperti 'intruder_photos/...'
+CREATE POLICY "Authorized users can read storage objects" ON storage.objects
+    FOR SELECT TO authenticated
+    USING (
+        bucket_id = 'ambient_audio'
+        AND (
+            (storage.foldername(name))[1] = auth.uid()::text
+            OR (
+                (storage.foldername(name))[1] ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                AND public.is_co_member_with(((storage.foldername(name))[1])::uuid)
+            )
+        )
+    );
+
+-- --------------------------------------------------------------------
+-- 8. FUNGSI KELUAR LINGKARAN & PEMBERSIHAN DATA PRIBADI (DENGAN CATATAN A3)
+-- --------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.leave_circle(p_circle_id UUID)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    IF auth.uid() IS NULL THEN
+        RAISE EXCEPTION 'unauthorized';
+    END IF;
+
+    -- Hapus keanggotaan pengguna di lingkaran tersebut
+    DELETE FROM public.circle_members
+    WHERE circle_id = p_circle_id AND user_id = auth.uid();
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.leave_circle(UUID) TO authenticated;
+
+-- ====================================================================
+-- CATATAN REVISI A3: KETERBATASAN DIKETAHUI PADA delete_my_account()
+-- ====================================================================
+-- 1. Fungsi SQL di bawah ini HANYA menghapus data di skema public (profiles,
+--    user_locations, location_history, user_devices, dll).
+-- 2. Baris auth.users di skema auth TIDAK DAPAT dihapus melalui kueri SQL
+--    pengguna/SECURITY DEFINER biasa karena dikelola eksklusif oleh GoTrue.
+--    Jika user login kembali, trigger handle_new_user() akan membuat profil baru.
+-- 3. File fisik pada bucket Storage (ambient_audio) tidak dihapus otomatis.
+-- 4. TINDAK LANJUT WAJIB: Untuk penghapusan akun penuh sesuai standar hukum
+--    UU PDP / GDPR, diperlukan Edge Function backend dengan service_role key
+--    (supabase.auth.admin.deleteUser(uid)) serta pembersihan storage.objects.
+-- ====================================================================
+CREATE OR REPLACE FUNCTION public.delete_my_account()
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_uid UUID := auth.uid();
+BEGIN
+    IF v_uid IS NULL THEN
+        RAISE EXCEPTION 'unauthorized';
+    END IF;
+
+    -- 1. Bersihkan lingkaran yang dibuat jika tidak ada anggota lain
+    DELETE FROM public.circles 
+    WHERE created_by = v_uid 
+      AND id NOT IN (SELECT circle_id FROM public.circle_members WHERE user_id != v_uid);
+
+    -- 2. Bersihkan profil (Cascades ke circle_members, sos_alerts, messages, dsb)
+    DELETE FROM public.profiles WHERE id = v_uid;
+    
+    -- 3. Hapus koordinat realtime & linimasa perjalanan
+    DELETE FROM public.user_locations WHERE user_id = v_uid;
+    DELETE FROM public.location_history WHERE user_id = v_uid;
+    DELETE FROM public.user_devices WHERE user_id = v_uid;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.delete_my_account() TO authenticated;
+
+-- Refresh cache PostgREST
+NOTIFY pgrst, 'reload schema';
+

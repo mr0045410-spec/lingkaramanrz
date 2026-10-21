@@ -149,6 +149,8 @@ class LostModeProtectionService : Service() {
             )
         }
 
+        InternalIntentGuard.signIntent(this, lockIntent)
+
         val pendingIntent = PendingIntent.getActivity(
             this,
             NOTIFICATION_ID,
@@ -192,6 +194,8 @@ class LostModeProtectionService : Service() {
                     Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
                 )
             }
+
+            InternalIntentGuard.signIntent(this, restartIntent)
 
             val restartPendingIntent = PendingIntent.getActivity(
                 applicationContext,

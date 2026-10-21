@@ -36,7 +36,8 @@ object SosDirectSender {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val supabaseUrl = getPrefString(prefs, "supabase_url") ?: "https://uwxecnbeqeysnlzwdcha.supabase.co"
         val anonKey = getPrefString(prefs, "supabase_anon_key") ?: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV3eGVjbmJlcWV5c25sendkY2hhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwMDc3NTIsImV4cCI6MjEwNzU4Mzc1Mn0.QmoEmp4OBRHyhsHWYNCftnbdF19Z0Oi-hF2n8HJoJ8U"
-        val accessToken = getPrefString(prefs, "access_token")
+        val rawAccessToken = getPrefString(prefs, "access_token")
+        val accessToken = decodeSecureToken(rawAccessToken)
         val userId = getPrefString(prefs, "user_id")
         val circleId = getPrefString(prefs, "active_circle_id")
         val lat = getPrefDouble(prefs, "last_lat")
@@ -90,6 +91,20 @@ object SosDirectSender {
             Log.e(TAG, "Exception during direct SOS dispatch", e)
             showSosNotification(context, "Peringatan SOS", "Gagal memancarkan SOS: ${e.localizedMessage}")
         }
+    }
+
+    private fun decodeSecureToken(raw: String?): String? {
+        if (raw == null) return null
+        if (raw.startsWith("sec_v1:")) {
+            try {
+                val payload = raw.removePrefix("sec_v1:")
+                val decoded = android.util.Base64.decode(payload, android.util.Base64.URL_SAFE)
+                return String(decoded.reversedArray(), Charsets.UTF_8)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to decode obfuscated token: ${e.message}")
+            }
+        }
+        return raw
     }
 
     private fun getPrefString(prefs: SharedPreferences, key: String): String? {

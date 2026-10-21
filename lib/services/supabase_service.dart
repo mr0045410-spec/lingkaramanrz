@@ -372,6 +372,36 @@ class SupabaseService {
     return members;
   }
 
+  Future<void> leaveCircle(String circleId) async {
+    final uid = currentUser?.id;
+    if (uid == null) throw Exception('Belum login');
+    await _client
+        .from('circle_members')
+        .delete()
+        .eq('circle_id', circleId)
+        .eq('user_id', uid);
+  }
+
+  Future<void> removeMember(String circleId, String memberUserId) async {
+    await _client
+        .from('circle_members')
+        .delete()
+        .eq('circle_id', circleId)
+        .eq('user_id', memberUserId);
+  }
+
+  Future<void> deleteMyAccount() async {
+    final uid = currentUser?.id;
+    if (uid == null) throw Exception('Belum login');
+    try {
+      await _client.rpc('delete_my_account');
+    } catch (_) {
+      // Fallback penghapusan profil relasional mandiri
+      await _client.from('profiles').delete().eq('id', uid);
+    }
+    await signOut();
+  }
+
   // ---------------- REALTIME LOCATIONS & RIWAYAT PERJALANAN ----------------
   Future<void> updateMyLocation({
     required double latitude,
@@ -653,9 +683,9 @@ class SupabaseService {
     }).toList();
   }
 
-  RealtimeChannel subscribeToMessages(String circleId, void Function(CircleMessage) onMessage) {
+  RealtimeChannel subscribeToMessages(String circleId, void Function(CircleMessage) onMessage, {String channelSuffix = 'global'}) {
     return _client
-        .channel('public:circle_messages:$circleId')
+        .channel('public:circle_messages:${circleId}_$channelSuffix')
         .onPostgresChanges(
           event: PostgresChangeEvent.insert,
           schema: 'public',

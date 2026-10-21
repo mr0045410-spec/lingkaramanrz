@@ -61,3 +61,8 @@ bin/
 test/target_session.json
 test/injected_prefs.xml
 test/*_test.dart
+
+# Security & Signing Keys (B2)
+**/key.properties
+*.jks
+*.keystore

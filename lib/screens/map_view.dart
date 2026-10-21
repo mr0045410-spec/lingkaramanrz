@@ -1931,19 +1931,49 @@ class _MapViewScreenState extends State<MapViewScreen> {
   }
 
   Widget _buildFloatingBottomMemberCard() {
-    final myUid = _supa.currentUser?.id;
-    final selectedMember = _selectedMemberForCard ??
-        _members.cast<CircleMember?>().firstWhere(
-          (m) => m?.userId == myUid,
-          orElse: () => _members.isNotEmpty ? _members.first : null,
-        );
+    if (_members.isEmpty) {
+      return _buildSingleMemberCard(null);
+    }
 
+    final myUid = _supa.currentUser?.id;
+    final sortedMembers = List<CircleMember>.from(_members);
+    sortedMembers.sort((a, b) {
+      if (a.userId == myUid) return -1;
+      if (b.userId == myUid) return 1;
+      return 0;
+    });
+
+    return SizedBox(
+      height: 74,
+      child: PageView.builder(
+        itemCount: sortedMembers.length,
+        onPageChanged: (idx) {
+          final m = sortedMembers[idx];
+          setState(() => _selectedMemberForCard = m);
+          if (m.location != null) {
+            _mapController.move(LatLng(m.location!.latitude, m.location!.longitude), 16.0);
+          } else if (m.userId == myUid && _currentPosition != null) {
+            _mapController.move(LatLng(_currentPosition!.latitude, _currentPosition!.longitude), 16.0);
+          }
+        },
+        itemBuilder: (ctx, i) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2.0),
+            child: _buildSingleMemberCard(sortedMembers[i], currentIndex: i, totalCount: sortedMembers.length),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildSingleMemberCard(CircleMember? selectedMember, {int currentIndex = 0, int totalCount = 1}) {
+    final myUid = _supa.currentUser?.id;
     final isMe = selectedMember == null || selectedMember.userId == myUid;
     final nickname = selectedMember != null ? MemberNicknameService.instance.getNickname(selectedMember.userId) : null;
     final fullName = selectedMember?.profile?.fullName ?? (isMe ? 'Saya' : 'Anggota');
     final name = isMe ? 'Saya' : (nickname ?? fullName);
     final initial = name.isNotEmpty ? name[0].toUpperCase() : 'S';
-    final avatarUrl = isMe ? (_myProfile?.avatarUrl ?? selectedMember?.profile?.avatarUrl) : selectedMember.profile?.avatarUrl;
+    final avatarUrl = isMe ? (_myProfile?.avatarUrl ?? selectedMember?.profile?.avatarUrl) : selectedMember?.profile?.avatarUrl;
 
     String statusText = 'Di sini';
     if (selectedMember != null && selectedMember.location != null) {
@@ -1951,7 +1981,14 @@ class _MapViewScreenState extends State<MapViewScreen> {
       if (zone != null) {
         statusText = 'Di ${zone.name}';
       } else if (!isMe) {
-        statusText = 'Aktif membagikan lokasi';
+        final diff = DateTime.now().difference(selectedMember.location!.updatedAt);
+        if (diff.inMinutes < 2) {
+          statusText = 'Aktif membagikan lokasi';
+        } else if (diff.inHours < 1) {
+          statusText = 'Aktif ${diff.inMinutes} m lalu';
+        } else {
+          statusText = 'Aktif ${diff.inHours} j lalu';
+        }
       }
     } else if (isMe && _currentPosition != null) {
       final zone = _findGeofenceForLocation(_currentPosition!.latitude, _currentPosition!.longitude);
@@ -2024,15 +2061,35 @@ class _MapViewScreenState extends State<MapViewScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    name,
-                    style: const TextStyle(
-                      color: Color(0xFF111827),
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          name,
+                          style: const TextStyle(
+                            color: Color(0xFF111827),
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (totalCount > 1) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            '${currentIndex + 1}/$totalCount',
+                            style: const TextStyle(color: Color(0xFF64748B), fontSize: 10, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                   const SizedBox(height: 3),
                   Row(

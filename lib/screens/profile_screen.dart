@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -8,6 +9,9 @@ import '../services/oem_security_service.dart';
 import '../services/location_service.dart';
 import '../services/phone_protection_service.dart';
 import '../services/sos_trigger_service.dart';
+import '../services/fall_detection_service.dart';
+import '../services/fake_call_service.dart';
+import '../services/safety_timer_service.dart';
 import '../services/supabase_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/sound_settings_dialog.dart';
@@ -27,6 +31,13 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
   final SosTriggerService _sosTriggerService = SosTriggerService();
   final BatteryOptimizationService _batteryService = BatteryOptimizationService();
   final OemSecurityService _oemSecurityService = OemSecurityService();
+  final FallDetectionService _fallDetectionService = FallDetectionService();
+  final FakeCallService _fakeCallService = FakeCallService();
+  final SafetyTimerService _safetyTimerService = SafetyTimerService();
+  StreamSubscription? _safetyTimerSub;
+  StreamSubscription? _fakeCallSub;
+  int _fakeCallRemaining = 0;
+  bool _isFallDetectionEnabled = false;
 
   OemDeviceInfo _deviceInfo = const OemDeviceInfo(
     manufacturer: 'android',
@@ -43,7 +54,7 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
   bool _isBatteryOptimizedIgnored = false;
 
   // Keamanan & Anti-Maling state
-  String _currentPin = '1234';
+  String _currentPin = '';
   bool _isPowerButtonEnabled = true;
   int _powerButtonCount = 3;
   bool _isIntruderTrapEnabled = true;
@@ -55,12 +66,25 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
   @override
   void initState() {
     super.initState();
+    _safetyTimerSub = _safetyTimerService.onTick.listen((_) {
+      if (mounted) setState(() {});
+    });
+    _fakeCallSub = _fakeCallService.onCountdown.listen((sec) {
+      if (mounted) setState(() => _fakeCallRemaining = sec);
+    });
     WidgetsBinding.instance.addObserver(this);
     _loadProfile();
     _loadSecuritySettings();
     _checkBatteryOptimization();
     _loadOemSecurityStatus();
     _isLocationSharing = _locService.isTracking;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        setState(() {
+          _isLocationSharing = _locService.isTracking;
+        });
+      }
+    });
   }
 
   @override
@@ -68,6 +92,11 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
     if (state == AppLifecycleState.resumed) {
       _checkBatteryOptimization();
       _loadOemSecurityStatus();
+      if (mounted) {
+        setState(() {
+          _isLocationSharing = _locService.isTracking;
+        });
+      }
     }
   }
 
@@ -345,6 +374,93 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
     }
   }
 
+  Future<void> _handleLocationSharingToggle(bool targetVal) async {
+    final hasPin = await _phoneProtectionService.hasOwnerPin();
+    if (!hasPin) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Atur PIN Keamanan terlebih dahulu di Pengaturan Anti-Maling sebelum mengubah status berbagi lokasi!')),
+        );
+        await _changeOwnerPinDialog();
+      }
+      return;
+    }
+
+    final pinCtrl = TextEditingController();
+    final verified = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Verifikasi PIN Keamanan'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              targetVal
+                  ? 'Masukkan PIN Keamanan untuk mengaktifkan kembali berbagi lokasi:'
+                  : 'Demi keamanan keluarga, masukkan PIN Keamanan untuk menonaktifkan berbagi lokasi realtime:',
+              style: const TextStyle(fontSize: 13, color: Colors.black87),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: pinCtrl,
+              keyboardType: TextInputType.number,
+              maxLength: 6,
+              autofocus: true,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'PIN Keamanan',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.lock_outline),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final ok = await _phoneProtectionService.verifyUnlockPin(pinCtrl.text.trim());
+              if (!ctx.mounted) return;
+              if (ok) {
+                Navigator.pop(ctx, true);
+              } else {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(content: Text('PIN Salah! Akses ditolak.')),
+                );
+              }
+            },
+            child: const Text('Verifikasi'),
+          ),
+        ],
+      ),
+    );
+
+    if (verified == true && mounted) {
+      setState(() => _isLocationSharing = targetVal);
+      if (targetVal) {
+        _locService.startTracking();
+      } else {
+        _locService.stopTracking();
+      }
+      final curCircle = _supa.currentCircleId;
+      final curUid = _supa.currentUser?.id;
+      if (curCircle != null && curUid != null) {
+        try {
+          await _supa.client
+              .from('circle_members')
+              .update({'is_sharing_location': targetVal})
+              .eq('circle_id', curCircle)
+              .eq('user_id', curUid);
+        } catch (_) {}
+      }
+    }
+  }
+
   void _showPowerButtonSettings() {
     showModalBottomSheet(
       context: context,
@@ -437,6 +553,8 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
     _nameCtrl.dispose();
     _phoneCtrl.dispose();
     _emergencyCtrl.dispose();
+    _safetyTimerSub?.cancel();
+    _fakeCallSub?.cancel();
     super.dispose();
   }
 
@@ -777,17 +895,10 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                                 ),
                               ),
                               Switch(
-                                value: _isLocationSharing,
+                                value: _locService.isTracking,
                                 activeColor: const Color(0xFF16A34A),
                                 activeTrackColor: const Color(0xFFDCFCE7),
-                                onChanged: (val) {
-                                  setState(() => _isLocationSharing = val);
-                                  if (val) {
-                                    _locService.startTracking();
-                                  } else {
-                                    _locService.stopTracking();
-                                  }
-                                },
+                                onChanged: (val) => _handleLocationSharingToggle(val),
                               ),
                             ],
                           ),
@@ -842,6 +953,310 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                           ],
                         ),
                         const SizedBox(height: 12),
+
+                        // CARD HORIZONTAL: DETEKSI JATUH & KECELAKAAN (OPSIONAL - DEFAULT OFF)
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: AppColors.border),
+                          ),
+                          child: Column(
+                            children: [
+                              SwitchListTile(
+                                secondary: Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: _isFallDetectionEnabled ? Colors.red.shade50 : AppColors.primaryTint,
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Icon(
+                                    Icons.personal_injury_rounded,
+                                    color: _isFallDetectionEnabled ? Colors.red.shade700 : AppColors.primaryNavy,
+                                    size: 20,
+                                  ),
+                                ),
+                                title: const Text(
+                                  'Deteksi Jatuh & Kecelakaan',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppColors.textPrimary,
+                                  ),
+                                ),
+                                subtitle: const Text(
+                                  'Kirim SOS otomatis jika benturan keras & tak ada respons',
+                                  style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                                ),
+                                value: _isFallDetectionEnabled,
+                                activeColor: Colors.red.shade700,
+                                onChanged: (val) async {
+                                  setState(() => _isFallDetectionEnabled = val);
+                                  await _fallDetectionService.setEnabled(val);
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          val
+                                              ? 'Deteksi Jatuh Aktif (Default OFF dinonaktifkan).'
+                                              : 'Deteksi Jatuh Dimatikan.',
+                                        ),
+                                        duration: const Duration(seconds: 2),
+                                      ),
+                                    );
+                                  }
+                                },
+                              ),
+                              if (_isFallDetectionEnabled)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 16, right: 16, bottom: 10),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.end,
+                                    children: [
+                                      TextButton.icon(
+                                        style: TextButton.styleFrom(
+                                          foregroundColor: Colors.red.shade700,
+                                          visualDensity: VisualDensity.compact,
+                                        ),
+                                        icon: const Icon(Icons.play_circle_outline, size: 16),
+                                        label: const Text(
+                                          'Uji Simulasi Benturan',
+                                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                        ),
+                                        onPressed: () {
+                                          _fallDetectionService.simulateFall();
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+
+                        
+                        // CARD HORIZONTAL: FITUR S5 - PANGGILAN PALSU DARURAT (FAKE CALL)
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: Colors.purple.shade100),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(14),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(8),
+                                      decoration: BoxDecoration(
+                                        color: Colors.purple.shade50,
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: const Icon(Icons.ring_volume_rounded, color: Colors.deepPurple, size: 20),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: const [
+                                          Text(
+                                            'Panggilan Palsu Darurat (S5)',
+                                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                                          ),
+                                          Text(
+                                            'Panggilan masuk penyelamat diri dari situasi tidak nyaman',
+                                            style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(Icons.settings_outlined, size: 20, color: Colors.deepPurple),
+                                      tooltip: 'Atur Penelepon',
+                                      onPressed: _showFakeCallSettingsDialog,
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 10),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: ElevatedButton.icon(
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.deepPurple,
+                                          foregroundColor: Colors.white,
+                                          padding: const EdgeInsets.symmetric(vertical: 8),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                        ),
+                                        icon: const Icon(Icons.phone_rounded, size: 16),
+                                        label: const Text('Panggil Sekarang', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                        onPressed: () {
+                                          _fakeCallService.launchCallNow(context);
+                                        },
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    OutlinedButton.icon(
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: Colors.deepPurple,
+                                        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                      ),
+                                      icon: Icon(_fakeCallRemaining > 0 ? Icons.timer_outlined : Icons.hourglass_top_rounded, size: 16),
+                                      label: Text(
+                                        _fakeCallRemaining > 0 ? 'Dering in ${_fakeCallRemaining}s' : 'Delay 10s',
+                                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                      ),
+                                      onPressed: () {
+                                        if (_fakeCallRemaining > 0) {
+                                          _fakeCallService.cancelScheduledCall();
+                                        } else {
+                                          _fakeCallService.scheduleCall(context, delay: const Duration(seconds: 10));
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            const SnackBar(content: Text('Panggilan palsu akan berdering dalam 10 detik!')),
+                                          );
+                                        }
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+
+                        // CARD HORIZONTAL: FITUR S6 - SAFETY TIMER / CHECK-IN PERJALANAN
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: _safetyTimerService.isActive ? Colors.teal : AppColors.border,
+                              width: _safetyTimerService.isActive ? 1.5 : 1,
+                            ),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(14),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(8),
+                                      decoration: BoxDecoration(
+                                        color: _safetyTimerService.isActive ? Colors.teal.shade50 : AppColors.primaryTint,
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: Icon(
+                                        Icons.timer_outlined,
+                                        color: _safetyTimerService.isActive ? Colors.teal : AppColors.primaryNavy,
+                                        size: 20,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const Text(
+                                            'Safety Timer / Check-in (S6)',
+                                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                                          ),
+                                          Text(
+                                            _safetyTimerService.isActive
+                                                ? 'Aktif: ${_safetyTimerService.tripDescription}'
+                                                : 'Konfirmasi keamanan otomatis saat bepergian sendiri',
+                                            style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    if (_safetyTimerService.isActive)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: Colors.teal.shade50,
+                                          borderRadius: BorderRadius.circular(10),
+                                          border: Border.all(color: Colors.teal),
+                                        ),
+                                        child: Text(
+                                          _safetyTimerService.formattedRemaining,
+                                          style: TextStyle(
+                                            color: Colors.teal.shade900,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                                const SizedBox(height: 10),
+                                if (_safetyTimerService.isActive)
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: ElevatedButton.icon(
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: Colors.teal,
+                                            foregroundColor: Colors.white,
+                                            padding: const EdgeInsets.symmetric(vertical: 8),
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                          ),
+                                          icon: const Icon(Icons.check_circle_outline_rounded, size: 16),
+                                          label: const Text('SAYA SUDAH TIBA (CHECK-IN)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                          onPressed: () async {
+                                            await _safetyTimerService.checkInSafe();
+                                            if (mounted) {
+                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                const SnackBar(
+                                                  content: Text('✅ Check-In Berhasil! Kabar aman terkirim ke obrolan keluarga.'),
+                                                  backgroundColor: Colors.teal,
+                                                ),
+                                              );
+                                            }
+                                          },
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      OutlinedButton(
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor: Colors.red,
+                                          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                        ),
+                                        onPressed: () {
+                                          _safetyTimerService.stopTimer();
+                                        },
+                                        child: const Text('Batal', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                      ),
+                                    ],
+                                  )
+                                else
+                                  SizedBox(
+                                    width: double.infinity,
+                                    child: OutlinedButton.icon(
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: Colors.teal.shade800,
+                                        side: BorderSide(color: Colors.teal.shade300),
+                                        padding: const EdgeInsets.symmetric(vertical: 8),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                      ),
+                                      icon: const Icon(Icons.add_alarm_rounded, size: 16),
+                                      label: const Text('Pasang Timer Perjalanan Aman', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                      onPressed: _showStartSafetyTimerDialog,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
 
                         // 4. CARD HORIZONTAL: PENGATURAN NADA & RINGTONE
                         Container(
@@ -982,6 +1397,177 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
     );
   }
 
+
+  Future<void> _showFakeCallSettingsDialog() async {
+    final nameCtrl = TextEditingController(text: await _fakeCallService.getCallerName());
+    final numberCtrl = TextEditingController(text: await _fakeCallService.getCallerNumber());
+
+    if (!mounted) return;
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: const [
+            Icon(Icons.phone_in_talk_rounded, color: Colors.deepPurple),
+            SizedBox(width: 8),
+            Text('Atur Panggilan Palsu', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Nama Penelepon',
+                hintText: 'Contoh: Ibu, Ayah, Polisi',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: numberCtrl,
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(
+                labelText: 'Nomor Penelepon',
+                hintText: 'Contoh: +62 812-3456-7890',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple, foregroundColor: Colors.white),
+            onPressed: () async {
+              await _fakeCallService.setCallerName(nameCtrl.text.trim());
+              await _fakeCallService.setCallerNumber(numberCtrl.text.trim());
+              if (mounted) {
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Pengaturan Panggilan Palsu disimpan.')),
+                );
+              }
+            },
+            child: const Text('Simpan'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showStartSafetyTimerDialog() async {
+    final descCtrl = TextEditingController(text: 'Perjalanan Pulang');
+    int selectedMinutes = 15;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setSheetState) => Padding(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: const [
+                  Icon(Icons.timer_outlined, color: Colors.teal, size: 24),
+                  SizedBox(width: 10),
+                  Text(
+                    'Pasang Safety Timer (S6)',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Jika waktu perjalanan habis dan Anda belum Check-In Aman, alarm keras akan berbunyi dan sinyal SOS otomatis dikirim ke keluarga.',
+                style: TextStyle(fontSize: 12, color: Colors.black54),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: descCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Deskripsi / Catatan Perjalanan',
+                  hintText: 'Misal: Naik Gojek AB 1234 CD ke Kos',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text('Pilih Durasi Waktu:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [1, 15, 30, 45].map((m) {
+                  final isSel = selectedMinutes == m;
+                  return ChoiceChip(
+                    label: Text(m == 1 ? '1 Menit (Tes)' : '$m Mnt'),
+                    selected: isSel,
+                    selectedColor: Colors.teal.shade100,
+                    labelStyle: TextStyle(
+                      color: isSel ? Colors.teal.shade900 : Colors.black87,
+                      fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                    ),
+                    onSelected: (val) {
+                      if (val) setSheetState(() => selectedMinutes = m);
+                    },
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.teal,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  icon: const Icon(Icons.play_arrow_rounded),
+                  label: const Text('Mulai Perjalanan Aman', style: TextStyle(fontWeight: FontWeight.bold)),
+                  onPressed: () {
+                    _safetyTimerService.startSafetyTimer(
+                      durationMinutes: selectedMinutes,
+                      description: descCtrl.text,
+                    );
+                    Navigator.pop(ctx);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Safety Timer aktif: $selectedMinutes menit.'),
+                        backgroundColor: Colors.teal,
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildFeatureCard({
     required IconData icon,
     required String label,
@@ -1054,7 +1640,7 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
             ),
             const SizedBox(height: 12),
             Text(
-              'PIN Keamanan Anda: ${_currentPin.replaceAll(RegExp(r'.'), '•')}',
+              'Status PIN Keamanan: ${_currentPin.isNotEmpty ? "Terpasang & Terenkripsi" : "Belum Diatur"}',
               style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.primaryNavy),
             ),
           ],

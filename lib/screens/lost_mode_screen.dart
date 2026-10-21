@@ -30,6 +30,7 @@ class _LostModeScreenState extends State<LostModeScreen>
   int _fakeShutdownTapCount = 0;
   Timer? _tapResetTimer;
   bool _isSirenActive = false;
+  StreamSubscription<LostModeCommand>? _lostModeSub;
 
   @override
   void initState() {
@@ -40,6 +41,12 @@ class _LostModeScreenState extends State<LostModeScreen>
 
     _isFakeShutdown = widget.command.enableFakeShutdown;
     _isSirenActive = widget.command.enableSiren;
+
+    _lostModeSub = _protectionService.onLostModeChanged.listen((cmd) {
+      if (!cmd.isActive && mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+    });
 
     _pulseController = AnimationController(
       vsync: this,
@@ -78,6 +85,7 @@ class _LostModeScreenState extends State<LostModeScreen>
 
   @override
   void dispose() {
+    _lostModeSub?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _pulseController.dispose();

@@ -65,8 +65,13 @@ import android.view.WindowInsets
 import android.view.WindowInsetsController
 
 import android.view.WindowManager
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 
 import io.flutter.embedding.android.FlutterActivity
+import android.util.Log
 
 import io.flutter.embedding.engine.FlutterEngine
 
@@ -102,6 +107,13 @@ class MainActivity : FlutterActivity() {
     private val EMERGENCY_NOTIFICATION_CHANNEL_ID = "lingkaraman_emergency_alert"
 
     private val EMERGENCY_NOTIFICATION_ID = 999111
+    private val FALL_DETECTION_CHANNEL = "com.lingkaraman.lingkar_aman/fall_detection"
+    private var fallDetectionChannel: MethodChannel? = null
+    private var sensorManager: SensorManager? = null
+    private var accelerometer: Sensor? = null
+    private var fallSensorListener: SensorEventListener? = null
+    private var isFallDetectionRunning = false
+    private var lastFreeFallTimestamp: Long = 0
 
 
 
@@ -120,6 +132,9 @@ class MainActivity : FlutterActivity() {
     private var previewTone: ToneGenerator? = null
 
     private var previewRingtone: Ringtone? = null
+
+    private val previousStreamVolumes = mutableMapOf<Int, Int>()
+    private var previousRingerMode: Int? = null
 
 
 
@@ -167,13 +182,37 @@ class MainActivity : FlutterActivity() {
 
 
 
+        val isInternal = InternalIntentGuard.isIntentAuthentic(this, intent)
+
         if (intent?.getBooleanExtra("trigger_sos_immediately", false) == true) {
 
-            initialSosTrigger = true
+            if (isInternal) {
+
+                initialSosTrigger = true
+
+            } else {
+
+                Log.w("MainActivity", "SECURITY ALERT: Rejected untrusted trigger_sos_immediately from external Intent!")
+
+            }
 
         }
 
-        if (intent?.getBooleanExtra("lost_mode_locked", false) == true || isLostModeActive()) {
+        if (intent?.getBooleanExtra("lost_mode_locked", false) == true) {
+
+            if (isInternal || isLostModeActive()) {
+
+                initialLostModeLock = true
+
+                applyLockWindowFlags(true)
+
+            } else {
+
+                Log.w("MainActivity", "SECURITY ALERT: Rejected untrusted lost_mode_locked from external Intent!")
+
+            }
+
+        } else if (isLostModeActive()) {
 
             initialLostModeLock = true
 
@@ -205,13 +244,37 @@ class MainActivity : FlutterActivity() {
 
         setIntent(intent)
 
+        val isInternal = InternalIntentGuard.isIntentAuthentic(this, intent)
+
         if (intent.getBooleanExtra("trigger_sos_immediately", false)) {
 
-            notifySosTriggered()
+            if (isInternal) {
+
+                notifySosTriggered()
+
+            } else {
+
+                Log.w("MainActivity", "SECURITY ALERT: Rejected untrusted trigger_sos_immediately in onNewIntent!")
+
+            }
 
         }
 
-        if (intent.getBooleanExtra("lost_mode_locked", false) || isLostModeActive()) {
+        if (intent.getBooleanExtra("lost_mode_locked", false)) {
+
+            if (isInternal || isLostModeActive()) {
+
+                applyLockWindowFlags(true)
+
+                notifyLostModeTriggered()
+
+            } else {
+
+                Log.w("MainActivity", "SECURITY ALERT: Rejected untrusted lost_mode_locked in onNewIntent!")
+
+            }
+
+        } else if (isLostModeActive()) {
 
             applyLockWindowFlags(true)
 
@@ -309,6 +372,8 @@ class MainActivity : FlutterActivity() {
 
                             }
 
+                            InternalIntentGuard.signIntent(this, pinIntent)
+
                             val pinShortcutInfo = ShortcutInfo.Builder(this, "sos_shortcut")
 
                                 .setShortLabel("SOS Darurat")
@@ -397,7 +462,10 @@ class MainActivity : FlutterActivity() {
 
 
 
-                        // 1. Keluar dari mode hening/getar (Silent / Vibrate) paksa ke RINGER_MODE_NORMAL
+                        // 1. Catat mode dering dan volume awal sebelum dinaikkan (pulihkan volume alarm setelah bunyi)
+                        if (previousRingerMode == null) {
+                            previousRingerMode = audioManager.ringerMode
+                        }
 
                         try {
 
@@ -424,6 +492,9 @@ class MainActivity : FlutterActivity() {
                         for (st in targetStreams) {
 
                             try {
+                                if (!previousStreamVolumes.containsKey(st)) {
+                                    previousStreamVolumes[st] = audioManager.getStreamVolume(st)
+                                }
 
                                 val max = audioManager.getStreamMaxVolume(st)
 
@@ -1600,6 +1671,7 @@ class MainActivity : FlutterActivity() {
 
             }
 
+            InternalIntentGuard.signIntent(this, intent)
             startActivity(intent)
 
         } catch (e: Exception) {
@@ -1791,6 +1863,25 @@ class MainActivity : FlutterActivity() {
         alarmRingtone = null
 
         stopVibrate()
+
+        // Pulihkan level volume dan mode ringer audio ke kondisi semula
+        try {
+            val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            if (audioManager != null) {
+                for ((st, vol) in previousStreamVolumes) {
+                    try {
+                        audioManager.setStreamVolume(st, vol, 0)
+                    } catch (_: Exception) {}
+                }
+                previousStreamVolumes.clear()
+                previousRingerMode?.let {
+                    try {
+                        audioManager.ringerMode = it
+                    } catch (_: Exception) {}
+                    previousRingerMode = null
+                }
+            }
+        } catch (_: Exception) {}
 
     }
 
@@ -2028,7 +2119,51 @@ class MainActivity : FlutterActivity() {
 
 
 
+    private fun startFallDetectionInternal() {
+        if (isFallDetectionRunning) return
+        if (sensorManager == null) {
+            sensorManager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+        }
+        accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        if (accelerometer == null) return
+
+        fallSensorListener = object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent?) {
+                if (event == null || event.sensor.type != Sensor.TYPE_ACCELEROMETER) return
+                val x = event.values[0]
+                val y = event.values[1]
+                val z = event.values[2]
+                val g = Math.sqrt((x * x + y * y + z * z).toDouble())
+                val now = System.currentTimeMillis()
+
+                if (g < 3.5) {
+                    lastFreeFallTimestamp = now
+                } else if (g > 24.0 && (now - lastFreeFallTimestamp) < 600) {
+                    lastFreeFallTimestamp = 0
+                    runOnUiThread {
+                        fallDetectionChannel?.invokeMethod("onFallDetected", null)
+                    }
+                }
+            }
+
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+        }
+
+        sensorManager?.registerListener(fallSensorListener, accelerometer, SensorManager.SENSOR_DELAY_UI)
+        isFallDetectionRunning = true
+    }
+
+    private fun stopFallDetectionInternal() {
+        if (!isFallDetectionRunning) return
+        fallSensorListener?.let {
+            sensorManager?.unregisterListener(it)
+        }
+        fallSensorListener = null
+        isFallDetectionRunning = false
+    }
+
     override fun onDestroy() {
+        stopFallDetectionInternal()
 
         enableStatusBarBlocker(false)
 

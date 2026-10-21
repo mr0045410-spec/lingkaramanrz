@@ -1,3 +1,15 @@
+DateTime _parseDateTime(dynamic val) {
+  if (val == null) return DateTime.now();
+  if (val is DateTime) return val;
+  return DateTime.tryParse(val.toString()) ?? DateTime.now();
+}
+
+DateTime? _parseDateTimeNullable(dynamic val) {
+  if (val == null) return null;
+  if (val is DateTime) return val;
+  return DateTime.tryParse(val.toString());
+}
+
 class UserProfile {
   final String id;
   final String fullName;
@@ -45,7 +57,7 @@ class CircleModel {
       name: map['name'] as String,
       inviteCode: map['invite_code'] as String,
       createdBy: map['created_by'] as String?,
-      createdAt: DateTime.parse(map['created_at'] as String),
+      createdAt: _parseDateTime(map['created_at']),
     );
   }
 }
@@ -97,7 +109,7 @@ class CircleMember {
       userId: map['user_id'] as String,
       role: (map['role'] as String?) ?? 'member',
       isSharingLocation: (map['is_sharing_location'] as bool?) ?? true,
-      joinedAt: DateTime.parse(map['joined_at'] as String),
+      joinedAt: _parseDateTime(map['joined_at']),
     );
   }
 }
@@ -129,7 +141,7 @@ class UserLocation {
       batteryLevel: (map['battery_level'] as num?)?.toInt() ?? 100,
       isCharging: (map['is_charging'] as bool?) ?? false,
       speed: (map['speed'] as num?)?.toDouble() ?? 0.0,
-      updatedAt: DateTime.parse(map['updated_at'] as String),
+      updatedAt: _parseDateTime(map['updated_at']),
     );
   }
 }
@@ -168,8 +180,8 @@ class SosAlert {
       longitude: (map['longitude'] as num).toDouble(),
       message: (map['message'] as String?) ?? 'DARURAT! Butuh bantuan segera.',
       status: (map['status'] as String?) ?? 'active',
-      triggeredAt: DateTime.parse(map['triggered_at'] as String),
-      resolvedAt: map['resolved_at'] != null ? DateTime.parse(map['resolved_at'] as String) : null,
+      triggeredAt: _parseDateTime(map['triggered_at']),
+      resolvedAt: _parseDateTimeNullable(map['resolved_at']),
     );
   }
 }
@@ -197,7 +209,7 @@ class CircleMessage {
       circleId: map['circle_id'] as String,
       userId: map['user_id'] as String,
       message: map['message'] as String,
-      createdAt: DateTime.parse(map['created_at'] as String),
+      createdAt: _parseDateTime(map['created_at']),
     );
   }
 }
@@ -234,8 +246,8 @@ class AudioRequestModel {
       status: (map['status'] as String?) ?? 'pending',
       audioUrl: map['audio_url'] as String?,
       durationSeconds: (map['duration_seconds'] as num?)?.toInt() ?? 15,
-      createdAt: DateTime.parse(map['created_at'] as String),
-      completedAt: map['completed_at'] != null ? DateTime.parse(map['completed_at'] as String) : null,
+      createdAt: _parseDateTime(map['created_at']),
+      completedAt: _parseDateTimeNullable(map['completed_at']),
     );
   }
 
@@ -292,8 +304,8 @@ class LoudSignalModel {
       targetUserId: map['target_user_id'] as String,
       circleId: map['circle_id'] as String?,
       status: (map['status'] as String?) ?? 'pending',
-      createdAt: DateTime.parse(map['created_at'] as String),
-      stoppedAt: map['stopped_at'] != null ? DateTime.parse(map['stopped_at'] as String) : null,
+      createdAt: _parseDateTime(map['created_at']),
+      stoppedAt: _parseDateTimeNullable(map['stopped_at']),
     );
   }
 
@@ -343,9 +355,9 @@ class AppUsageModel {
       packageName: map['package_name'] as String,
       appName: map['app_name'] as String,
       totalTimeForegroundSeconds: (map['total_time_foreground_seconds'] as num?)?.toInt() ?? 0,
-      lastTimeUsed: map['last_time_used'] != null ? DateTime.parse(map['last_time_used'] as String) : null,
+      lastTimeUsed: _parseDateTimeNullable(map['last_time_used']),
       reportDate: map['report_date'] as String,
-      updatedAt: DateTime.parse(map['updated_at'] as String),
+      updatedAt: _parseDateTime(map['updated_at']),
     );
   }
 }
@@ -383,7 +395,7 @@ class GeofenceModel {
       longitude: (map['longitude'] as num).toDouble(),
       radiusMeters: (map['radius_meters'] as num?)?.toDouble() ?? 150.0,
       createdBy: map['created_by'] as String?,
-      createdAt: DateTime.parse(map['created_at'] as String),
+      createdAt: _parseDateTime(map['created_at']),
     );
   }
 }
@@ -416,7 +428,7 @@ class GeofenceEventModel {
       circleId: map['circle_id'] as String,
       userId: map['user_id'] as String,
       eventType: (map['event_type'] as String?) ?? 'entered',
-      createdAt: DateTime.parse(map['created_at'] as String),
+      createdAt: _parseDateTime(map['created_at']),
     );
   }
 
@@ -488,7 +500,7 @@ class LostModeCommand {
       message: (map['message'] as String?) ?? 'HP ini dalam pengawasan keluarga.',
       enableSiren: (map['enable_siren'] as bool?) ?? true,
       enableFakeShutdown: (map['enable_fake_shutdown'] as bool?) ?? true,
-      updatedAt: DateTime.parse(map['updated_at'] as String),
+      updatedAt: _parseDateTime(map['updated_at']),
     );
   }
 
@@ -587,7 +599,7 @@ class IntruderAlertModel {
       longitude: (map['longitude'] as num).toDouble(),
       photoUrl: map['photo_url'] as String?,
       alertType: (map['alert_type'] as String?) ?? 'wrong_pin',
-      createdAt: DateTime.parse(map['created_at'] as String),
+      createdAt: _parseDateTime(map['created_at']),
     );
   }
 }
@@ -623,7 +635,7 @@ class LastBreathBeaconModel {
       latitude: (map['latitude'] as num).toDouble(),
       longitude: (map['longitude'] as num).toDouble(),
       batteryLevel: (map['battery_level'] as num?)?.toInt() ?? 5,
-      timestamp: DateTime.parse(map['timestamp'] as String),
+      timestamp: _parseDateTime(map['timestamp']),
     );
   }
 }
@@ -667,9 +679,7 @@ class TripPoint {
       longitude: (map['longitude'] as num).toDouble(),
       batteryLevel: (map['battery_level'] as num?)?.toInt() ?? 100,
       speed: (map['speed'] as num?)?.toDouble() ?? 0.0,
-      recordedAt: map['recorded_at'] != null
-          ? DateTime.parse(map['recorded_at'] as String)
-          : DateTime.now(),
+      recordedAt: _parseDateTime(map['recorded_at']),
     );
   }
 }

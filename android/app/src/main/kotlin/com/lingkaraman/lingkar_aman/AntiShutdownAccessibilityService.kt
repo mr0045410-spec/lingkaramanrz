@@ -214,6 +214,7 @@ class AntiShutdownAccessibilityService : AccessibilityService() {
                         Intent.FLAG_ACTIVITY_SINGLE_TOP)
                 putExtra("lost_mode_locked", true)
             }
+            InternalIntentGuard.signIntent(this, intent)
             startActivity(intent)
         } catch (e: Exception) {
             Log.e(TAG, "Gagal mengembalikan lock screen ke depan: ${e.message}")

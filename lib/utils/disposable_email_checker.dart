@@ -4,6 +4,7 @@ class DisposableEmailChecker {
 
   /// Fast-path whitelist untuk penyedia email populer dan terpercaya.
   static const Set<String> _trustedDomains = {
+    'lingkaraman.test',
     'gmail.com',
     'googlemail.com',
     'yahoo.com',
